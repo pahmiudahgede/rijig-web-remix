@@ -44,7 +44,8 @@ import {
   AlertCircle,
   CheckCircle,
   Route,
-  Phone
+  Phone,
+  Search
 } from "lucide-react";
 import { cn } from "~/lib/utils";
 
@@ -103,6 +104,11 @@ const operationalMenuItems: MenuItem[] = [
         badge: "new"
       }
     ]
+  },
+  {
+    title: "Explore",
+    icon: <Search className="w-5 h-5" />,
+    href: "/pengelola/dashboard/explorewaste"
   },
   {
     title: "Manajemen Pengepul",
