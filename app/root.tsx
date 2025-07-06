@@ -55,6 +55,7 @@ export default function AppWithProviders() {
 export function App() {
   const data = useLoaderData<typeof loader>();
   const [theme] = useTheme();
+
   return (
     <html lang="id" className={clsx(theme)}>
       <head>
@@ -65,12 +66,23 @@ export function App() {
         <Links />
       </head>
       <body>
-        <ProgressProvider startOnLoad>
-          <ScrollRestoration />
-          <Scripts />
-          <LiveReload />
+        <ProgressProvider
+          color={theme === "dark" ? "#10b981" : "#059669"}
+          options={{
+            showSpinner: false,
+            speed: 300,
+            minimum: 0.08,
+            easing: "ease",
+            positionUsing: "",
+            template:
+              '<div class="bar" role="bar"><div class="peg"></div></div>'
+          }}
+        >
           <Outlet />
         </ProgressProvider>
+        <ScrollRestoration />
+        <Scripts />
+        <LiveReload />
       </body>
     </html>
   );
