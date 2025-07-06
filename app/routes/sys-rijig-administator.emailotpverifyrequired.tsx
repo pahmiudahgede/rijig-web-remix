@@ -9,7 +9,8 @@ import {
   useActionData,
   useLoaderData,
   useNavigation,
-  useSearchParams
+  useSearchParams,
+  Link
 } from "@remix-run/react";
 import { useState, useEffect, useRef } from "react";
 import { cn } from "~/lib/utils";
@@ -25,8 +26,11 @@ import {
   AlertCircle,
   ArrowLeft,
   RefreshCw,
-  Loader2
+  Loader2,
+  KeyRound
 } from "lucide-react";
+import { Boxes } from "~/components/ui/background-boxes";
+import { ThemeFloatingDock } from "~/components/ui/floatingthemeswitch";
 
 interface LoaderData {
   email: string;
@@ -129,6 +133,7 @@ export default function AdminVerifyOTP() {
   const isResending = navigation.formData?.get("_action") === "resend";
   const isVerifying = navigation.formData?.get("_action") === "verify";
 
+  // Timer countdown
   useEffect(() => {
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
@@ -143,6 +148,7 @@ export default function AdminVerifyOTP() {
     return () => clearInterval(timer);
   }, []);
 
+  // Reset timer when OTP is resent
   useEffect(() => {
     if (actionData?.success && actionData?.otpSentAt) {
       setTimeLeft(expiryMinutes * 60);
@@ -189,163 +195,235 @@ export default function AdminVerifyOTP() {
   const maskedEmail = email.replace(/(.{2})(.*)(@.*)/, "$1***$3");
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 to-blue-50 p-4">
-      <div className="w-full max-w-md">
-        <Card className="border-0 shadow-2xl">
-          <CardHeader className="text-center pb-2">
-            <div className="mx-auto mb-4 p-3 bg-green-100 rounded-full w-fit">
-              <Mail className="h-8 w-8 text-green-600" />
-            </div>
-            <CardTitle className="text-2xl font-bold text-gray-900">
-              Verifikasi Email
-            </CardTitle>
-            <p className="text-muted-foreground text-sm">
-              Masukkan kode OTP 4 digit yang telah dikirim ke
-            </p>
-            <p className="font-medium text-green-600">{maskedEmail}</p>
-          </CardHeader>
+    <div className="h-full relative w-full overflow-hidden bg-slate-900 dark:bg-slate-950 light:bg-slate-100 flex flex-col items-center justify-center rounded-lg">
+      {/* Background overlay with theme-aware gradient */}
+      <div className="absolute inset-0 w-full h-full bg-slate-900 dark:bg-slate-950 light:bg-slate-100 z-20 [mask-image:radial-gradient(transparent,white)] pointer-events-none" />
 
-          <CardContent className="space-y-6">
-            {/* Success Alert */}
-            {actionData?.success && actionData?.message && (
-              <Alert className="border-green-200 bg-green-50">
-                <CheckCircle className="h-4 w-4 text-green-600" />
-                <AlertDescription className="text-green-800">
-                  {actionData.message}
-                </AlertDescription>
-              </Alert>
-            )}
+      {/* Animated background boxes */}
+      <Boxes />
 
-            {/* Error Alert */}
-            {actionData?.errors?.otp && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{actionData.errors.otp}</AlertDescription>
-              </Alert>
-            )}
+      {/* Theme Toggle - Positioned at top-right */}
+      <ThemeFloatingDock className="fixed top-6 right-6 z-50" />
 
-            {/* OTP Input Form */}
-            <Form method="post">
-              <input type="hidden" name="email" value={email} />
-              <input type="hidden" name="_action" value="verify" />
-              <input type="hidden" name="otp" value={otp.join("")} />
-
-              <div className="space-y-4">
-                {/* OTP Input Fields */}
-                <div className="flex justify-center space-x-3">
-                  {otp.map((digit, index) => (
-                    <Input
-                      key={index}
-                      ref={(el) => (inputRefs.current[index] = el)}
-                      type="text"
-                      maxLength={1}
-                      value={digit}
-                      onChange={(e) => handleOtpChange(index, e.target.value)}
-                      onKeyDown={(e) => handleKeyDown(index, e)}
-                      onPaste={handlePaste}
-                      className={cn(
-                        "w-12 h-12 text-center text-lg font-bold",
-                        actionData?.errors?.otp && "border-red-500"
-                      )}
-                      autoFocus={index === 0}
-                    />
-                  ))}
-                </div>
-
-                {/* Timer */}
-                <div className="text-center">
-                  {timeLeft > 0 ? (
-                    <div className="flex items-center justify-center space-x-2 text-sm text-gray-600">
-                      <Clock className="h-4 w-4" />
-                      <span>Kode kedaluwarsa dalam {formatTime(timeLeft)}</span>
-                    </div>
-                  ) : (
-                    <div className="text-sm text-red-600 font-medium">
-                      Kode OTP telah kedaluwarsa
-                    </div>
-                  )}
-                </div>
-
-                {/* Verify Button */}
-                <Button
-                  type="submit"
-                  className="w-full bg-green-600 hover:bg-green-700"
-                  disabled={
-                    otp.join("").length !== 4 || isSubmitting || timeLeft === 0
-                  }
-                >
-                  {isVerifying ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Memverifikasi...
-                    </>
-                  ) : (
-                    "Verifikasi Kode"
-                  )}
-                </Button>
+      {/* Main content container */}
+      <div className="min-h-screen flex items-center justify-center w-full max-w-md z-20 p-4">
+        <div className="w-full space-y-6">
+          <Card className="border-0 shadow-2xl bg-background/95 backdrop-blur-sm">
+            <CardHeader className="text-center pb-2">
+              <div className="mx-auto mb-4 p-3 bg-green-100 dark:bg-green-900/30 rounded-full w-fit">
+                <KeyRound className="h-8 w-8 text-green-600 dark:text-green-400" />
               </div>
-            </Form>
-
-            {/* Resend OTP */}
-            <div className="text-center">
-              <p className="text-sm text-gray-600 mb-2">Tidak menerima kode?</p>
-              <Form method="post" className="inline">
-                <input type="hidden" name="email" value={email} />
-                <input type="hidden" name="_action" value="resend" />
-                <Button
-                  type="submit"
-                  variant="outline"
-                  size="sm"
-                  disabled={!canResend || isSubmitting}
-                  className="text-green-600 border-green-600 hover:bg-green-50"
-                >
-                  {isResending ? (
-                    <>
-                      <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                      Mengirim...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="mr-2 h-3 w-3" />
-                      Kirim Ulang OTP
-                    </>
-                  )}
-                </Button>
-              </Form>
-            </div>
-
-            {/* Back to Login */}
-            <div className="text-center">
-              <a
-                href="/sys-rijig-administrator/sign-infirst"
-                className="inline-flex items-center text-sm text-gray-600 hover:text-green-600"
-              >
-                <ArrowLeft className="mr-1 h-3 w-3" />
-                Kembali ke Login
-              </a>
-            </div>
-
-            {/* Demo Info */}
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm font-medium text-blue-800 mb-2">
-                Demo OTP:
+              <CardTitle className="text-2xl font-bold text-foreground">
+                Verifikasi Email
+              </CardTitle>
+              <p className="text-muted-foreground text-sm mt-2">
+                Masukkan kode OTP 4 digit yang telah dikirim ke
               </p>
-              <div className="text-xs text-blue-700 space-y-1">
-                <p>
-                  Gunakan kode:{" "}
-                  <span className="font-mono font-bold">1234</span>
+              <p className="font-medium text-primary bg-primary/10 dark:bg-primary/20 px-3 py-1 rounded-full text-sm inline-block mt-2">
+                {maskedEmail}
+              </p>
+            </CardHeader>
+
+            <CardContent className="space-y-6">
+              {/* Success Alert */}
+              {actionData?.success && actionData?.message && (
+                <Alert className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30">
+                  <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                  <AlertDescription className="text-green-800 dark:text-green-300">
+                    {actionData.message}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Error Alert */}
+              {actionData?.errors?.otp && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{actionData.errors.otp}</AlertDescription>
+                </Alert>
+              )}
+
+              {/* OTP Input Form */}
+              <Form method="post">
+                <input type="hidden" name="email" value={email} />
+                <input type="hidden" name="_action" value="verify" />
+                <input type="hidden" name="otp" value={otp.join("")} />
+
+                <div className="space-y-6">
+                  {/* OTP Input Fields */}
+                  <div className="space-y-3">
+                    <div className="flex justify-center space-x-3">
+                      {otp.map((digit, index) => (
+                        <Input
+                          key={index}
+                          ref={(el) => (inputRefs.current[index] = el)}
+                          type="text"
+                          maxLength={1}
+                          value={digit}
+                          onChange={(e) =>
+                            handleOtpChange(index, e.target.value)
+                          }
+                          onKeyDown={(e) => handleKeyDown(index, e)}
+                          onPaste={handlePaste}
+                          className={cn(
+                            "w-14 h-14 text-center text-xl font-bold bg-background border-input transition-all duration-200 focus:scale-105",
+                            actionData?.errors?.otp &&
+                              "border-red-500 dark:border-red-400"
+                          )}
+                          autoFocus={index === 0}
+                        />
+                      ))}
+                    </div>
+
+                    <p className="text-center text-xs text-muted-foreground">
+                      Tempel kode OTP atau ketik manual
+                    </p>
+                  </div>
+
+                  {/* Timer */}
+                  <div className="text-center">
+                    {timeLeft > 0 ? (
+                      <div className="flex items-center justify-center space-x-2 text-sm text-muted-foreground">
+                        <Clock className="h-4 w-4" />
+                        <span>
+                          Kode kedaluwarsa dalam {formatTime(timeLeft)}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-red-600 dark:text-red-400 font-medium">
+                        Kode OTP telah kedaluwarsa
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Verify Button */}
+                  <Button
+                    type="submit"
+                    className="w-full bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700 text-white shadow-lg transition-all duration-200"
+                    disabled={
+                      otp.join("").length !== 4 ||
+                      isSubmitting ||
+                      timeLeft === 0
+                    }
+                  >
+                    {isVerifying ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Memverifikasi...
+                      </>
+                    ) : (
+                      <>
+                        <Shield className="mr-2 h-4 w-4" />
+                        Verifikasi & Masuk
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </Form>
+
+              {/* Resend OTP */}
+              <div className="text-center space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Tidak menerima kode?
                 </p>
-                <p>Atau tunggu countdown habis untuk test resend</p>
+                <Form method="post" className="inline">
+                  <input type="hidden" name="email" value={email} />
+                  <input type="hidden" name="_action" value="resend" />
+                  <Button
+                    type="submit"
+                    variant="outline"
+                    size="sm"
+                    disabled={!canResend || isSubmitting}
+                    className="text-primary border-primary hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
+                  >
+                    {isResending ? (
+                      <>
+                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                        Mengirim...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="mr-2 h-3 w-3" />
+                        Kirim Ulang OTP
+                      </>
+                    )}
+                  </Button>
+                </Form>
+              </div>
+
+              {/* Security Info */}
+              <div className="p-4 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <div className="flex items-start space-x-3">
+                  <Mail className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
+                      Keamanan Email
+                    </p>
+                    <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
+                      Kode OTP dikirim melalui email terenkripsi untuk
+                      memastikan keamanan akun administrator Anda.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Demo Info */}
+              <div className="p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-2">
+                  Demo OTP:
+                </p>
+                <div className="text-xs text-amber-700 dark:text-amber-400 space-y-1">
+                  <p>
+                    Gunakan kode:{" "}
+                    <span className="font-mono font-bold text-lg px-2 py-1 bg-amber-100 dark:bg-amber-900/50 rounded">
+                      1234
+                    </span>
+                  </p>
+                  <p>Atau tunggu countdown habis untuk test resend</p>
+                </div>
+              </div>
+
+              {/* Back to Login */}
+              <div className="text-center">
+                <Link
+                  to="/sys-rijig-administrator/sign-infirst"
+                  className="inline-flex items-center text-sm text-muted-foreground hover:text-primary transition-colors"
+                >
+                  <ArrowLeft className="mr-1 h-3 w-3" />
+                  Kembali ke Login
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Footer */}
+          <div className="text-center">
+            <div className="text-xs text-muted-foreground space-y-2">
+              <p>Portal Administrator - Sistem Pengelolaan Sampah Terpadu</p>
+              <div className="flex items-center justify-center space-x-4">
+                <a
+                  href="/privacy"
+                  className="hover:text-primary transition-colors underline underline-offset-4"
+                >
+                  Privacy
+                </a>
+                <span>•</span>
+                <a
+                  href="/terms"
+                  className="hover:text-primary transition-colors underline underline-offset-4"
+                >
+                  Terms
+                </a>
+                <span>•</span>
+                <a
+                  href="/support"
+                  className="hover:text-primary transition-colors underline underline-offset-4"
+                >
+                  Support
+                </a>
               </div>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Footer */}
-        <div className="text-center mt-6">
-          <p className="text-xs text-gray-500">
-            Sistem Pengelolaan Sampah Terpadu
-          </p>
+          </div>
         </div>
       </div>
     </div>

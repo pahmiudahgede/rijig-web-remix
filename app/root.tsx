@@ -67,11 +67,10 @@ export function App() {
       </head>
       <body>
         <ProgressProvider
+          startOnLoad
           color={theme === "dark" ? "#10b981" : "#059669"}
           options={{
             showSpinner: false,
-            speed: 300,
-            minimum: 0.08,
             easing: "ease",
             positionUsing: "",
             template:
