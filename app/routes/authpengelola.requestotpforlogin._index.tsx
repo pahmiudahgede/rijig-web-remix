@@ -12,11 +12,14 @@ import {
   ArrowRight,
   AlertCircle,
   Loader2,
-  MessageSquare,
   CheckCircle,
   LogIn,
   Shield
 } from "lucide-react";
+import { getSession, commitSession } from "~/sessions.server";
+import { generateDeviceId, validatePhoneNumber } from "~/utils/auth-utils";
+import pengelolaAuthService from "~/services/auth/pengelola.service";
+import type { ApiResponse } from "~/lib/api-client";
 
 // Progress Indicator Component untuk Login (3 steps)
 const LoginProgressIndicator = ({ currentStep = 1, totalSteps = 3 }) => {
@@ -79,46 +82,70 @@ export const action = async ({
 
   if (!phone) {
     errors.phone = "Nomor WhatsApp wajib diisi";
-  } else {
-    // Validasi format nomor HP Indonesia
-    const phoneRegex = /^62[0-9]{9,14}$/;
-    if (!phoneRegex.test(phone)) {
-      errors.phone = "Format: 628xxxxxxxxx (9-14 digit setelah 62)";
-    }
+  } else if (!validatePhoneNumber(phone)) {
+    errors.phone = "Format: 628xxxxxxxxx (9-14 digit setelah 62)";
   }
 
   if (Object.keys(errors).length > 0) {
     return json<RequestOTPLoginActionData>({ errors }, { status: 400 });
   }
 
-  // Simulasi cek apakah nomor terdaftar
-  const registeredPhones = ["6281234567890", "6281234567891", "6281234567892"];
-  if (!registeredPhones.includes(phone)) {
-    return json<RequestOTPLoginActionData>(
-      {
-        errors: {
-          phone: "Nomor tidak terdaftar. Silakan daftar terlebih dahulu."
-        }
-      },
-      { status: 404 }
-    );
-  }
+  // Generate device ID untuk session ini
+  const deviceId = generateDeviceId("PengelolaLogin");
 
-  // Simulasi kirim OTP - dalam implementasi nyata, integrate dengan WhatsApp Business API
   try {
-    console.log("Sending login OTP to WhatsApp:", phone);
+    // Request OTP untuk login
+    const response = await pengelolaAuthService.requestOtpLogin({
+      phone,
+      role_name: "pengelola"
+    });
 
-    // Simulasi delay API call
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Simpan data ke session untuk langkah berikutnya
+    const session = await getSession(request);
+    session.set("tempLoginPhone", phone);
+    session.set("tempLoginDeviceId", deviceId);
+    session.set("tempLoginOtpSentAt", new Date().toISOString());
 
-    // Redirect ke step berikutnya dengan nomor HP
-    return redirect(
-      `/authpengelola/verifyotptologin?phone=${encodeURIComponent(phone)}`
-    );
-  } catch (error) {
+    // Redirect ke step berikutnya
+    return redirect("/authpengelola/verifyotptologin", {
+      headers: {
+        "Set-Cookie": await commitSession(session)
+      }
+    });
+  } catch (error: any) {
+    console.error("Request OTP login error:", error);
+
+    // Handle specific API errors
+    if (error.response?.status === 404) {
+      return json<RequestOTPLoginActionData>(
+        {
+          errors: {
+            phone: "Nomor tidak terdaftar. Silakan daftar terlebih dahulu."
+          }
+        },
+        { status: 404 }
+      );
+    }
+
+    if (error.response?.status === 429) {
+      return json<RequestOTPLoginActionData>(
+        {
+          errors: {
+            general: "Terlalu banyak permintaan. Silakan tunggu beberapa menit."
+          }
+        },
+        { status: 429 }
+      );
+    }
+
+    // General error
+    const errorMessage =
+      error.response?.data?.meta?.message ||
+      "Gagal mengirim OTP. Silakan coba lagi.";
+
     return json<RequestOTPLoginActionData>(
       {
-        errors: { general: "Gagal mengirim OTP. Silakan coba lagi." }
+        errors: { general: errorMessage }
       },
       { status: 500 }
     );
@@ -252,18 +279,6 @@ export default function RequestOTPForLogin() {
                     untuk memastikan keamanan akun Anda.
                   </p>
                 </div>
-              </div>
-            </div>
-
-            {/* Demo Info */}
-            <div className="p-3 bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-              <p className="text-xs font-medium text-yellow-800 dark:text-yellow-300 mb-2">
-                Demo - Nomor Terdaftar:
-              </p>
-              <div className="space-y-1 text-xs text-yellow-700 dark:text-yellow-400">
-                <p>• 6281234567890</p>
-                <p>• 6281234567891</p>
-                <p>• 6281234567892</p>
               </div>
             </div>
 

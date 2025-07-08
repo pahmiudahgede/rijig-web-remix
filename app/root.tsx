@@ -7,14 +7,18 @@ import {
   ScrollRestoration,
   useLoaderData
 } from "@remix-run/react";
+import {
+  json,
+  type LinksFunction,
+  type LoaderFunctionArgs
+} from "@remix-run/node";
 import clsx from "clsx";
 import {
   PreventFlashOnWrongTheme,
   ThemeProvider,
   useTheme
 } from "remix-themes";
-import { themeSessionResolver } from "./sessions.server";
-import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
+import { getUserSession, themeSessionResolver } from "./sessions.server";
 import { ProgressProvider } from "@bprogress/remix";
 
 import "./tailwind.css";
@@ -38,9 +42,27 @@ export const links: LinksFunction = () => [
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { getTheme } = await themeSessionResolver(request);
-  return {
+  const userSession = await getUserSession(request);
+
+  const sessionData = userSession
+    ? {
+        accessToken: userSession.accessToken,
+        refreshToken: userSession.refreshToken,
+        sessionId: userSession.sessionId,
+        role: userSession.role,
+        deviceId: userSession.deviceId,
+        email: userSession.email,
+        phone: userSession.phone,
+        tokenType: userSession.tokenType,
+        registrationStatus: userSession.registrationStatus,
+        nextStep: userSession.nextStep
+      }
+    : null;
+
+  return json({
+    sessionData,
     theme: getTheme()
-  };
+  });
 }
 
 export default function AppWithProviders() {

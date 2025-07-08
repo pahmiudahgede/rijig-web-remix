@@ -5,7 +5,7 @@ import {
   type LoaderFunctionArgs
 } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -25,28 +25,42 @@ import {
 import { Boxes } from "~/components/ui/background-boxes";
 import { ThemeFloatingDock } from "~/components/ui/floatingthemeswitch";
 
-// Interface untuk action response
+// ✅ Import services and utils
+import adminAuthService from "~/services/auth/admin.service";
+import {
+  generateDeviceId,
+  validateEmail,
+  validatePassword
+} from "~/utils/auth-utils";
+import { getUserSession } from "~/sessions.server";
+
 interface LoginActionData {
   errors?: {
     email?: string;
     password?: string;
     general?: string;
   };
-  success: boolean;
+  success?: boolean;
+  otpData?: {
+    email: string;
+    message: string;
+    remaining_time: string;
+  };
 }
 
-// Loader - cek apakah user sudah login
+// ✅ Proper loader with session check
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  // Dalam implementasi nyata, cek session/cookie
-  // const session = await getSession(request.headers.get("Cookie"));
-  // if (session.has("adminId")) {
-  //   return redirect("/admin/dashboard");
-  // }
+  const userSession = await getUserSession(request);
+
+  // Redirect if already logged in
+  if (userSession && userSession.role === "administrator") {
+    return redirect("/sys-rijig-adminpanel/dashboard");
+  }
 
   return json({});
 };
 
-// Action untuk handle login
+// ✅ Action integrated with API service
 export const action = async ({
   request
 }: ActionFunctionArgs): Promise<Response> => {
@@ -55,48 +69,79 @@ export const action = async ({
   const password = formData.get("password") as string;
   const remember = formData.get("remember") === "on";
 
-  // Validation
+  // ✅ Validation using utils
   const errors: { email?: string; password?: string; general?: string } = {};
 
   if (!email) {
     errors.email = "Email wajib diisi";
-  } else if (!/\S+@\S+\.\S+/.test(email)) {
+  } else if (!validateEmail(email)) {
     errors.email = "Format email tidak valid";
   }
 
   if (!password) {
     errors.password = "Password wajib diisi";
-  } else if (password.length < 6) {
-    errors.password = "Password minimal 6 karakter";
+  } else if (!validatePassword(password)) {
+    errors.password =
+      "Password harus minimal 8 karakter, mengandung huruf kapital, angka, dan simbol";
   }
 
   if (Object.keys(errors).length > 0) {
     return json<LoginActionData>({ errors, success: false }, { status: 400 });
   }
 
-  // Simulasi autentikasi - dalam implementasi nyata, cek ke database
-  if (email === "admin@wastemanagement.com" && password === "admin123") {
-    // Set session dan redirect
-    // const session = await getSession(request.headers.get("Cookie"));
-    // session.set("adminId", "admin-001");
-    // session.set("adminName", "Administrator");
-    // session.set("adminEmail", email);
+  try {
+    // ✅ Generate device ID
+    const deviceId = generateDeviceId("Admin");
 
-    // Redirect ke OTP verification
-    return redirect(
-      `/sys-rijig-administator/emailotpverifyrequired?email=${encodeURIComponent(
-        email
-      )}`
+    // ✅ Call API service
+    const response = await adminAuthService.login({
+      device_id: deviceId,
+      email,
+      password
+    });
+
+    if (response.meta.status === 200 && response.data) {
+      // ✅ Success - redirect to OTP verification with data
+      const searchParams = new URLSearchParams({
+        email: response.data.email || email,
+        device_id: deviceId,
+        remaining_time: response.data.remaining_time || "5:00"
+      });
+
+      return redirect(
+        `/sys-rijig-administrator/emailotpverifyrequired?${searchParams.toString()}`
+      );
+    }
+
+    return json<LoginActionData>(
+      {
+        errors: { general: "Login gagal. Periksa email dan password Anda." },
+        success: false
+      },
+      { status: 401 }
+    );
+  } catch (error: any) {
+    console.error("Login error:", error);
+
+    // ✅ Handle API errors
+    if (error.response?.data?.meta?.message) {
+      return json<LoginActionData>(
+        {
+          errors: { general: error.response.data.meta.message },
+          success: false
+        },
+        { status: error.response.status || 500 }
+      );
+    }
+
+    return json<LoginActionData>(
+      {
+        errors: { general: "Terjadi kesalahan server. Silakan coba lagi." },
+        success: false
+      },
+      { status: 500 }
     );
   }
-
-  return json<LoginActionData>(
-    {
-      errors: { general: "Email atau password salah" },
-      success: false
-    },
-    { status: 401 }
-  );
 };
 
 export default function AdminLogin() {
@@ -182,7 +227,7 @@ export default function AdminLogin() {
                         Password
                       </Label>
                       <a
-                        href="/admin/forgot-password"
+                        href="/sys-rijig-administrator/forgot-password"
                         className="text-sm text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-300 underline-offset-2 hover:underline transition-colors"
                       >
                         Lupa password?
@@ -253,14 +298,17 @@ export default function AdminLogin() {
                     )}
                   </Button>
 
-                  {/* Demo Credentials */}
+                  {/* ✅ Updated demo credentials */}
                   <div className="p-4 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
                     <p className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2">
                       Demo Credentials:
                     </p>
                     <div className="text-xs text-blue-700 dark:text-blue-400 space-y-1">
-                      <p>Email: admin@wastemanagement.com</p>
-                      <p>Password: admin123</p>
+                      <p>Email: pahmilucu123@gmail.com</p>
+                      <p>Password: Halo12345,</p>
+                      <p className="text-amber-600 dark:text-amber-400 font-medium">
+                        ⚠️ OTP akan dikirim ke email setelah login
+                      </p>
                     </div>
                   </div>
                 </Form>

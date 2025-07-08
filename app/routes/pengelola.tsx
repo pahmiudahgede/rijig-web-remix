@@ -1,25 +1,35 @@
-import { json } from "@remix-run/node";
+import { json, LoaderFunctionArgs } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
 import { PengelolaLayoutWrapper } from "~/components/layoutpengelola/layout-wrapper";
+import { requireUserSession, SessionData } from "~/sessions.server";
 
-export const loader = async () => {
-  // Data untuk layout bisa diambil di sini
-  return json({
-    user: {
-      name: "Fahmi Kurniawan",
-      email: "pengelola@example.com",
-      role: "Pengelola"
-    }
+interface LoaderData {
+  user: SessionData;
+}
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const userSession = await requireUserSession(
+    request,
+    "pengelola",
+    "complete"
+  );
+
+  return json<LoaderData>({
+    user: userSession
   });
-};
+}
+
+// pada kode app/routes/pengelola.tsx pada bagian:
 
 export default function PengelolaPanelLayout() {
-  const { user } = useLoaderData<typeof loader>();
-
+  const { user } = useLoaderData<LoaderData>();
   return (
-    <PengelolaLayoutWrapper>
-      {/* Outlet akan merender child routes */}
+    <PengelolaLayoutWrapper user={user}>
       <Outlet />
     </PengelolaLayoutWrapper>
   );
 }
+
+
+/* terdapat error ini: Type '{ children: Element; user: SessionData; }' is not assignable to type 'IntrinsicAttributes & PengelolaLayoutWrapperProps'.
+  Property 'user' does not exist on type 'IntrinsicAttributes & PengelolaLayoutWrapperProps'.  */

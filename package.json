@@ -30,6 +30,7 @@
     "@remix-run/react": "^2.16.8",
     "@remix-run/serve": "^2.16.8",
     "@tabler/icons-react": "^3.34.0",
+    "axios": "^1.10.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "isbot": "^4.1.0",

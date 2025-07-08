@@ -1,4 +1,3 @@
-// app/components/layoutadmin/header.tsx
 import { useState } from "react";
 import { Form } from "@remix-run/react";
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
@@ -28,19 +27,32 @@ import {
   PanelLeftClose,
   PanelLeft
 } from "lucide-react";
+import { SessionData } from "~/sessions.server"; // Import SessionData type
 
 interface PengelolaHeaderProps {
   onMenuClick: () => void;
   sidebarCollapsed: boolean;
   isMobile: boolean;
+  user: SessionData; // Add user prop
 }
 
 export function PengelolaHeader({
   onMenuClick,
   sidebarCollapsed,
-  isMobile
+  isMobile,
+  user // Add user prop
 }: PengelolaHeaderProps) {
   // const [isDark, setIsDark] = useState(false);
+
+  // Get user initials for avatar fallback
+  const getUserInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  };
 
   return (
     <header className="sticky top-0 flex w-full bg-white border-b border-gray-200 z-40 dark:border-gray-700 dark:bg-gray-800">
@@ -186,19 +198,19 @@ export function PengelolaHeader({
                   <div className="flex items-center gap-3">
                     <Avatar className="h-8 w-8">
                       <AvatarImage
-                        src="https://github.com/leerob.png"
-                        alt="User"
+                        src={""}
+                        alt={"User"}
                       />
                       <AvatarFallback className="bg-blue-600 text-white">
-                        MU
+                        {getUserInitials("User")}
                       </AvatarFallback>
                     </Avatar>
                     <div className="hidden sm:block text-left">
                       <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        Fahmi Kurniawan
+                        {user.sessionId || "User"}
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-300">
-                        Pengelola
+                        {user.role || "Pengelola"}
                       </div>
                     </div>
                     <ChevronDown className="h-4 w-4 text-gray-500" />
@@ -210,9 +222,9 @@ export function PengelolaHeader({
                 className="w-56 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
               >
                 <div className="px-2 py-1.5 text-sm text-gray-700 dark:text-gray-200">
-                  <div className="font-medium">Fahmi Kurniawan</div>
+                  <div className="font-medium">{user.phone || "User"}</div>
                   <div className="text-xs text-gray-500 dark:text-gray-300">
-                    pengelola@example.com
+                    {user.email || "user@example.com"}
                   </div>
                 </div>
                 <DropdownMenuSeparator />

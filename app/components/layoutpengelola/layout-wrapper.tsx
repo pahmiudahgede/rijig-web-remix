@@ -1,12 +1,17 @@
 import { useState, useEffect } from "react";
 import { PengelolaSidebar } from "./sidebar";
 import { PengelolaHeader } from "./header";
+import { SessionData } from "~/sessions.server"; // Import SessionData type
 
 interface PengelolaLayoutWrapperProps {
   children: React.ReactNode;
+  user: SessionData; // Add user prop
 }
 
-export function PengelolaLayoutWrapper({ children }: PengelolaLayoutWrapperProps) {
+export function PengelolaLayoutWrapper({
+  children,
+  user
+}: PengelolaLayoutWrapperProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -47,6 +52,7 @@ export function PengelolaLayoutWrapper({ children }: PengelolaLayoutWrapperProps
         onClose={() => setSidebarOpen(false)}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
+        // user={user}
       />
 
       {/* Mobile overlay */}
@@ -68,6 +74,7 @@ export function PengelolaLayoutWrapper({ children }: PengelolaLayoutWrapperProps
           onMenuClick={handleToggleSidebar}
           sidebarCollapsed={sidebarCollapsed}
           isMobile={isMobile}
+          user={user}
         />
 
         {/* Page content */}

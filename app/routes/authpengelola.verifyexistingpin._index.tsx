@@ -30,6 +30,15 @@ import {
   KeyRound,
   Fingerprint
 } from "lucide-react";
+import {
+  getSession,
+  commitSession,
+  createUserSession
+} from "~/sessions.server";
+import { validatePin } from "~/utils/auth-utils";
+import pengelolaAuthService from "~/services/auth/pengelola.service";
+import commonAuthService from "~/services/auth/common.service";
+import type { AuthTokenData } from "~/types/auth.types";
 
 // Progress Indicator Component untuk Login (3 steps)
 const LoginProgressIndicator = ({ currentStep = 3, totalSteps = 3 }) => {
@@ -75,7 +84,8 @@ const LoginProgressIndicator = ({ currentStep = 3, totalSteps = 3 }) => {
 // Interfaces
 interface LoaderData {
   phone: string;
-  lastLoginAt?: string;
+  deviceId: string;
+  tokenData: AuthTokenData;
 }
 
 interface VerifyPINActionData {
@@ -89,17 +99,22 @@ interface VerifyPINActionData {
 export const loader = async ({
   request
 }: LoaderFunctionArgs): Promise<Response> => {
-  const url = new URL(request.url);
-  const phone = url.searchParams.get("phone");
+  const session = await getSession(request);
+  const phone = session.get("tempLoginPhone");
+  const deviceId = session.get("tempLoginDeviceId");
+  const tokenData = session.get("tempLoginTokenData");
 
-  if (!phone) {
+  if (!phone || !deviceId || !tokenData) {
     return redirect("/authpengelola/requestotpforlogin");
   }
 
-  // Simulasi data user - dalam implementasi nyata, ambil dari database
+  // Set auth token for API calls
+  commonAuthService.setAuthToken(tokenData.access_token);
+
   return json<LoaderData>({
     phone,
-    lastLoginAt: "2025-07-05T10:30:00Z" // contoh last login
+    deviceId,
+    tokenData
   });
 };
 
@@ -107,53 +122,133 @@ export const action = async ({
   request
 }: ActionFunctionArgs): Promise<Response> => {
   const formData = await request.formData();
-  const phone = formData.get("phone") as string;
   const pin = formData.get("pin") as string;
+
+  const session = await getSession(request);
+  const phone = session.get("tempLoginPhone");
+  const deviceId = session.get("tempLoginDeviceId");
+  const tokenData = session.get("tempLoginTokenData");
+
+  if (!phone || !deviceId || !tokenData) {
+    return redirect("/authpengelola/requestotpforlogin");
+  }
 
   // Validation
   const errors: { pin?: string; general?: string } = {};
 
-  if (!pin || pin.length !== 6) {
-    errors.pin = "PIN harus 6 digit";
-  } else if (!/^\d{6}$/.test(pin)) {
-    errors.pin = "PIN hanya boleh berisi angka";
+  if (!pin) {
+    errors.pin = "PIN wajib diisi";
+  } else if (!validatePin(pin)) {
+    errors.pin = "PIN harus 6 digit angka";
   }
 
   if (Object.keys(errors).length > 0) {
     return json<VerifyPINActionData>({ errors }, { status: 400 });
   }
 
-  // Simulasi verifikasi PIN - dalam implementasi nyata, hash dan compare dengan database
-  const validPIN = "123456"; // Demo PIN
+  // Set auth token for API calls
+  commonAuthService.setAuthToken(tokenData.access_token);
 
-  if (pin !== validPIN) {
-    return json<VerifyPINActionData>(
-      {
-        errors: { pin: "PIN yang Anda masukkan salah. Silakan coba lagi." }
-      },
-      { status: 401 }
-    );
-  }
-
-  // PIN valid, buat session dan redirect ke dashboard
   try {
-    console.log("PIN verified for phone:", phone);
+    // Verify PIN
+    const response = await pengelolaAuthService.verifyPin({
+      userpin: pin
+    });
 
-    // Simulasi delay dan create session
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const finalTokenData = response.data;
 
-    // Dalam implementasi nyata:
-    // const session = await getSession(request.headers.get("Cookie"));
-    // session.set("pengelolaId", userId);
-    // session.set("pengelolaPhone", phone);
-    // session.set("loginTime", new Date().toISOString());
+    // Check if finalTokenData exists
+    if (!finalTokenData) {
+      return json<VerifyPINActionData>(
+        {
+          errors: { general: "Response data tidak valid dari server" }
+        },
+        { status: 500 }
+      );
+    }
 
-    // Redirect ke dashboard pengelola
-    return redirect("/pengelola/dashboard");
-  } catch (error) {
+    // Validate required fields
+    if (
+      !finalTokenData.access_token ||
+      !finalTokenData.refresh_token ||
+      !finalTokenData.session_id
+    ) {
+      return json<VerifyPINActionData>(
+        {
+          errors: { general: "Data token tidak lengkap dari server" }
+        },
+        { status: 500 }
+      );
+    }
+
+    // Create user session dengan semua data yang diperlukan
+    const sessionData = {
+      accessToken: finalTokenData.access_token,
+      refreshToken: finalTokenData.refresh_token,
+      sessionId: finalTokenData.session_id,
+      role: "pengelola" as const,
+      deviceId,
+      phone,
+      tokenType: finalTokenData.token_type,
+      registrationStatus: finalTokenData.registration_status,
+      nextStep: finalTokenData.next_step
+    };
+
+    // Clear temporary session data
+    session.unset("tempLoginPhone");
+    session.unset("tempLoginDeviceId");
+    session.unset("tempLoginTokenData");
+    session.unset("tempLoginOtpSentAt");
+
+    // Create user session and redirect to dashboard
+    return createUserSession({
+      request,
+      sessionData,
+      redirectTo: "/pengelola/dashboard"
+    });
+  } catch (error: any) {
+    console.error("Verify PIN error:", error);
+
+    // Handle specific API errors
+    if (error.response?.status === 401) {
+      return json<VerifyPINActionData>(
+        {
+          errors: { pin: "PIN yang Anda masukkan salah. Silakan coba lagi." }
+        },
+        { status: 401 }
+      );
+    }
+
+    if (error.response?.status === 429) {
+      return json<VerifyPINActionData>(
+        {
+          errors: {
+            pin: "Terlalu banyak percobaan. Silakan tunggu beberapa menit."
+          }
+        },
+        { status: 429 }
+      );
+    }
+
+    if (error.response?.status === 403) {
+      return json<VerifyPINActionData>(
+        {
+          errors: {
+            general: "Akun Anda dikunci sementara. Hubungi administrator."
+          }
+        },
+        { status: 403 }
+      );
+    }
+
+    // General error
+    const errorMessage =
+      error.response?.data?.meta?.message ||
+      "Gagal memverifikasi PIN. Silakan coba lagi.";
+
     return json<VerifyPINActionData>(
       {
-        errors: { general: "Gagal login. Silakan coba lagi." }
+        errors: { general: errorMessage }
       },
       { status: 500 }
     );
@@ -161,13 +256,12 @@ export const action = async ({
 };
 
 export default function VerifyExistingPIN() {
-  const { phone, lastLoginAt } = useLoaderData<LoaderData>();
+  const { phone, deviceId, tokenData } = useLoaderData<LoaderData>();
   const actionData = useActionData<VerifyPINActionData>();
   const navigation = useNavigation();
 
   const [pin, setPin] = useState(["", "", "", "", "", ""]);
   const [showPin, setShowPin] = useState(false);
-  const [attemptCount, setAttemptCount] = useState(0);
 
   const pinRefs = useRef<(HTMLInputElement | null)[]>([]);
 
@@ -223,36 +317,7 @@ export default function VerifyExistingPIN() {
     )} ${phoneNumber.substring(5, 9)} ${phoneNumber.substring(9)}`;
   };
 
-  // Format last login
-  const formatLastLogin = (dateString?: string) => {
-    if (!dateString) return "Belum pernah login";
-
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInHours = Math.floor(
-      (now.getTime() - date.getTime()) / (1000 * 60 * 60)
-    );
-
-    if (diffInHours < 1) return "Kurang dari 1 jam yang lalu";
-    if (diffInHours < 24) return `${diffInHours} jam yang lalu`;
-
-    const diffInDays = Math.floor(diffInHours / 24);
-    if (diffInDays === 1) return "Kemarin";
-    if (diffInDays < 7) return `${diffInDays} hari yang lalu`;
-
-    return date.toLocaleDateString("id-ID", {
-      year: "numeric",
-      month: "long",
-      day: "numeric"
-    });
-  };
-
   const fullPin = pin.join("");
-
-  // Track failed attempts
-  if (actionData?.errors?.pin && attemptCount < 3) {
-    // In real implementation, this would be tracked server-side
-  }
 
   return (
     <div className="space-y-6">
@@ -268,7 +333,7 @@ export default function VerifyExistingPIN() {
               Selamat Datang Kembali!
             </p>
             <p className="text-sm text-green-700 dark:text-green-400">
-              Login terakhir: {formatLastLogin(lastLoginAt)}
+              Langkah terakhir untuk mengakses dashboard
             </p>
           </div>
         </div>
@@ -290,16 +355,17 @@ export default function VerifyExistingPIN() {
 
         <CardContent className="space-y-6">
           {/* Error Alert */}
-          {actionData?.errors?.general && (
+          {(actionData?.errors?.general || actionData?.errors?.pin) && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{actionData.errors.general}</AlertDescription>
+              <AlertDescription>
+                {actionData.errors.general || actionData.errors.pin}
+              </AlertDescription>
             </Alert>
           )}
 
           {/* Form */}
           <Form method="post" className="space-y-6">
-            <input type="hidden" name="phone" value={phone} />
             <input type="hidden" name="pin" value={fullPin} />
 
             {/* PIN Input */}
@@ -341,19 +407,6 @@ export default function VerifyExistingPIN() {
                   />
                 ))}
               </div>
-
-              {actionData?.errors?.pin && (
-                <div className="text-center">
-                  <p className="text-sm text-red-600 dark:text-red-400">
-                    {actionData.errors.pin}
-                  </p>
-                  {attemptCount >= 2 && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                      Akun akan dikunci sementara setelah 3 kali percobaan gagal
-                    </p>
-                  )}
-                </div>
-              )}
 
               <p className="text-center text-xs text-muted-foreground">
                 Tempel PIN atau ketik manual
@@ -436,32 +489,12 @@ export default function VerifyExistingPIN() {
           {/* Back Link */}
           <div className="text-center">
             <Link
-              to={`/authpengelola/verifyotptologin?phone=${encodeURIComponent(
-                phone
-              )}`}
+              to="/authpengelola/verifyotptologin"
               className="inline-flex items-center text-sm text-muted-foreground hover:text-primary transition-colors"
             >
               <ArrowLeft className="mr-1 h-4 w-4" />
               Kembali ke verifikasi OTP
             </Link>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Demo Info */}
-      <Card className="border border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/20 backdrop-blur-sm">
-        <CardContent className="p-4">
-          <div className="text-center">
-            <p className="text-sm font-medium text-green-800 dark:text-green-300 mb-2">
-              Demo PIN:
-            </p>
-            <div className="text-xs text-green-700 dark:text-green-400 space-y-1">
-              <p>
-                Gunakan PIN:{" "}
-                <span className="font-mono font-bold text-lg">123456</span>
-              </p>
-              <p>Untuk testing login flow pengelola</p>
-            </div>
           </div>
         </CardContent>
       </Card>

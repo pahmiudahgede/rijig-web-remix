@@ -28,6 +28,10 @@ import {
   Smartphone,
   Shield
 } from "lucide-react";
+import { getSession, commitSession } from "~/sessions.server";
+import { validateOtp } from "~/utils/auth-utils";
+import pengelolaAuthService from "~/services/auth/pengelola.service";
+import type { AuthTokenData } from "~/types/auth.types";
 
 // Progress Indicator Component untuk Login (3 steps)
 const LoginProgressIndicator = ({ currentStep = 2, totalSteps = 3 }) => {
@@ -73,6 +77,7 @@ const LoginProgressIndicator = ({ currentStep = 2, totalSteps = 3 }) => {
 // Interfaces
 interface LoaderData {
   phone: string;
+  deviceId: string;
   otpSentAt: string;
   expiryMinutes: number;
 }
@@ -90,16 +95,19 @@ interface VerifyOTPLoginActionData {
 export const loader = async ({
   request
 }: LoaderFunctionArgs): Promise<Response> => {
-  const url = new URL(request.url);
-  const phone = url.searchParams.get("phone");
+  const session = await getSession(request);
+  const phone = session.get("tempLoginPhone");
+  const deviceId = session.get("tempLoginDeviceId");
+  const otpSentAt = session.get("tempLoginOtpSentAt");
 
-  if (!phone) {
+  if (!phone || !deviceId) {
     return redirect("/authpengelola/requestotpforlogin");
   }
 
   return json<LoaderData>({
     phone,
-    otpSentAt: new Date().toISOString(),
+    deviceId,
+    otpSentAt: otpSentAt || new Date().toISOString(),
     expiryMinutes: 5
   });
 };
@@ -109,48 +117,148 @@ export const action = async ({
 }: ActionFunctionArgs): Promise<Response> => {
   const formData = await request.formData();
   const otp = formData.get("otp") as string;
-  const phone = formData.get("phone") as string;
   const actionType = formData.get("_action") as string;
 
-  if (actionType === "resend") {
-    // Simulasi resend OTP
-    console.log("Resending login OTP to WhatsApp:", phone);
+  const session = await getSession(request);
+  const phone = session.get("tempLoginPhone");
+  const deviceId = session.get("tempLoginDeviceId");
 
-    return json<VerifyOTPLoginActionData>({
-      success: true,
-      message: "Kode OTP baru telah dikirim ke WhatsApp Anda",
-      otpSentAt: new Date().toISOString()
-    });
+  if (!phone || !deviceId) {
+    return redirect("/authpengelola/requestotpforlogin");
+  }
+
+  if (actionType === "resend") {
+    try {
+      // Resend OTP
+      await pengelolaAuthService.requestOtpLogin({
+        phone,
+        role_name: "pengelola"
+      });
+
+      // Update OTP sent time
+      session.set("tempLoginOtpSentAt", new Date().toISOString());
+
+      return json<VerifyOTPLoginActionData>(
+        {
+          success: true,
+          message: "Kode OTP baru telah dikirim ke WhatsApp Anda",
+          otpSentAt: new Date().toISOString()
+        },
+        {
+          headers: {
+            "Set-Cookie": await commitSession(session)
+          }
+        }
+      );
+    } catch (error: any) {
+      console.error("Resend OTP error:", error);
+
+      const errorMessage =
+        error.response?.data?.meta?.message ||
+        "Gagal mengirim ulang OTP. Silakan coba lagi.";
+
+      return json<VerifyOTPLoginActionData>(
+        {
+          errors: { general: errorMessage }
+        },
+        { status: 500 }
+      );
+    }
   }
 
   if (actionType === "verify") {
     // Validation
     const errors: { otp?: string; general?: string } = {};
 
-    if (!otp || otp.length !== 4) {
-      errors.otp = "Kode OTP harus 4 digit";
-    } else if (!/^\d{4}$/.test(otp)) {
-      errors.otp = "Kode OTP hanya boleh berisi angka";
+    if (!otp) {
+      errors.otp = "Kode OTP wajib diisi";
+    } else if (!validateOtp(otp)) {
+      errors.otp = "Kode OTP harus 4 digit angka";
     }
 
     if (Object.keys(errors).length > 0) {
       return json<VerifyOTPLoginActionData>({ errors }, { status: 400 });
     }
 
-    // Simulasi verifikasi OTP - dalam implementasi nyata, cek ke database/cache
-    if (otp === "1234") {
-      // OTP valid, lanjut ke verifikasi PIN
-      return redirect(
-        `/authpengelola/verifyexistingpin?phone=${encodeURIComponent(phone)}`
+    try {
+      // Verify OTP untuk login
+      const response = await pengelolaAuthService.verifyOtpLogin({
+        phone,
+        otp,
+        device_id: deviceId,
+        role_name: "pengelola"
+      });
+
+      const tokenData = response.data;
+
+      // Check if tokenData exists
+      if (!tokenData) {
+        return json<VerifyOTPLoginActionData>(
+          {
+            errors: { general: "Response data tidak valid dari server" }
+          },
+          { status: 500 }
+        );
+      }
+
+      // Simpan data token ke session
+      session.set("tempLoginTokenData", tokenData);
+      session.set("tempLoginPhone", phone);
+      session.set("tempLoginDeviceId", deviceId);
+
+      // Check next step dari response
+      if (tokenData.next_step === "verif_pin") {
+        // Lanjut ke verifikasi PIN
+        return redirect("/authpengelola/verifyexistingpin", {
+          headers: {
+            "Set-Cookie": await commitSession(session)
+          }
+        });
+      } else {
+        // Jika sudah complete, langsung ke dashboard
+        // (tidak seharusnya terjadi untuk login flow, tapi handle just in case)
+        return redirect("/pengelola/dashboard", {
+          headers: {
+            "Set-Cookie": await commitSession(session)
+          }
+        });
+      }
+    } catch (error: any) {
+      console.error("Verify OTP login error:", error);
+
+      // Handle specific API errors
+      if (error.response?.status === 401) {
+        return json<VerifyOTPLoginActionData>(
+          {
+            errors: { otp: "Kode OTP tidak valid atau sudah kedaluwarsa" }
+          },
+          { status: 401 }
+        );
+      }
+
+      if (error.response?.status === 429) {
+        return json<VerifyOTPLoginActionData>(
+          {
+            errors: {
+              otp: "Terlalu banyak percobaan. Silakan tunggu beberapa menit."
+            }
+          },
+          { status: 429 }
+        );
+      }
+
+      // General error
+      const errorMessage =
+        error.response?.data?.meta?.message ||
+        "Gagal memverifikasi OTP. Silakan coba lagi.";
+
+      return json<VerifyOTPLoginActionData>(
+        {
+          errors: { general: errorMessage }
+        },
+        { status: 500 }
       );
     }
-
-    return json<VerifyOTPLoginActionData>(
-      {
-        errors: { otp: "Kode OTP tidak valid atau sudah kedaluwarsa" }
-      },
-      { status: 401 }
-    );
   }
 
   return json<VerifyOTPLoginActionData>(
@@ -162,7 +270,8 @@ export const action = async ({
 };
 
 export default function VerifyOTPToLogin() {
-  const { phone, otpSentAt, expiryMinutes } = useLoaderData<LoaderData>();
+  const { phone, deviceId, otpSentAt, expiryMinutes } =
+    useLoaderData<LoaderData>();
   const actionData = useActionData<VerifyOTPLoginActionData>();
   const navigation = useNavigation();
 
@@ -290,16 +399,17 @@ export default function VerifyOTPToLogin() {
           )}
 
           {/* Error Alert */}
-          {actionData?.errors?.otp && (
+          {(actionData?.errors?.otp || actionData?.errors?.general) && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{actionData.errors.otp}</AlertDescription>
+              <AlertDescription>
+                {actionData.errors.otp || actionData.errors.general}
+              </AlertDescription>
             </Alert>
           )}
 
           {/* OTP Input Form */}
           <Form method="post">
-            <input type="hidden" name="phone" value={phone} />
             <input type="hidden" name="_action" value="verify" />
             <input type="hidden" name="otp" value={otp.join("")} />
 
@@ -376,7 +486,6 @@ export default function VerifyOTPToLogin() {
               Tidak menerima kode?
             </p>
             <Form method="post" className="inline">
-              <input type="hidden" name="phone" value={phone} />
               <input type="hidden" name="_action" value="resend" />
               <Button
                 type="submit"
@@ -429,20 +538,19 @@ export default function VerifyOTPToLogin() {
         </CardContent>
       </Card>
 
-      {/* Demo Info */}
-      <Card className="border border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/20 backdrop-blur-sm">
+      {/* Help Card */}
+      <Card className="border border-border bg-background/60 backdrop-blur-sm">
         <CardContent className="p-4">
           <div className="text-center">
-            <p className="text-sm font-medium text-green-800 dark:text-green-300 mb-2">
-              Demo OTP:
-            </p>
-            <div className="text-xs text-green-700 dark:text-green-400 space-y-1">
-              <p>
-                Gunakan kode:{" "}
-                <span className="font-mono font-bold text-lg">1234</span>
-              </p>
-              <p>Atau tunggu countdown habis untuk test resend</p>
-            </div>
+            <p className="text-sm text-muted-foreground mb-2">Butuh bantuan?</p>
+            <a
+              href={`https://wa.me/6281234567890?text=Halo%20saya%20butuh%20bantuan%20login%20dengan%20nomor%20${phone}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-primary hover:text-primary/80 font-medium"
+            >
+              Hubungi Customer Support
+            </a>
           </div>
         </CardContent>
       </Card>

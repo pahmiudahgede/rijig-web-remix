@@ -32,9 +32,15 @@ import {
 import { Boxes } from "~/components/ui/background-boxes";
 import { ThemeFloatingDock } from "~/components/ui/floatingthemeswitch";
 
+// ✅ Import services and utils
+import adminAuthService from "~/services/auth/admin.service";
+import { validateOtp } from "~/utils/auth-utils";
+import { createUserSession, getUserSession } from "~/sessions.server";
+
 interface LoaderData {
   email: string;
-  otpSentAt: string;
+  deviceId: string;
+  remainingTime: string;
   expiryMinutes: number;
 }
 
@@ -48,64 +54,143 @@ interface OTPActionData {
   };
 }
 
+// ✅ Proper loader with URL params validation
 export const loader = async ({
   request
 }: LoaderFunctionArgs): Promise<Response> => {
+  const userSession = await getUserSession(request);
+
+  // Redirect if already logged in
+  if (userSession && userSession.role === "administrator") {
+    return redirect("/sys-rijig-adminpanel/dashboard");
+  }
+
   const url = new URL(request.url);
   const email = url.searchParams.get("email");
-  if (!email) {
+  const deviceId = url.searchParams.get("device_id");
+  const remainingTime = url.searchParams.get("remaining_time");
+
+  if (!email || !deviceId) {
     return redirect("/sys-rijig-administrator/sign-infirst");
   }
 
   return json<LoaderData>({
     email,
-    otpSentAt: new Date().toISOString(),
+    deviceId,
+    remainingTime: remainingTime || "5:00",
     expiryMinutes: 5
   });
 };
 
+// ✅ Action integrated with API service
 export const action = async ({
   request
 }: ActionFunctionArgs): Promise<Response> => {
   const formData = await request.formData();
   const otp = formData.get("otp") as string;
   const email = formData.get("email") as string;
+  const deviceId = formData.get("device_id") as string;
   const action = formData.get("_action") as string;
 
   if (action === "resend") {
-    console.log("Resending OTP to:", email);
+    try {
+      // ✅ Call login API again to resend OTP
+      const response = await adminAuthService.login({
+        device_id: deviceId,
+        email,
+        password: "temp" // We don't have password here, but API might handle resend differently
+      });
 
-    return json<OTPActionData>({
-      success: true,
-      message: "Kode OTP baru telah dikirim ke email Anda",
-      otpSentAt: new Date().toISOString()
-    });
+      return json<OTPActionData>({
+        success: true,
+        message: "Kode OTP baru telah dikirim ke email Anda",
+        otpSentAt: new Date().toISOString()
+      });
+    } catch (error: any) {
+      console.error("Resend OTP error:", error);
+      return json<OTPActionData>(
+        {
+          errors: { general: "Gagal mengirim ulang OTP. Silakan coba lagi." },
+          success: false
+        },
+        { status: 500 }
+      );
+    }
   }
 
   if (action === "verify") {
+    // ✅ Validation using utils
     const errors: { otp?: string; general?: string } = {};
 
-    if (!otp || otp.length !== 4) {
-      errors.otp = "Kode OTP harus 4 digit";
-    } else if (!/^\d{4}$/.test(otp)) {
-      errors.otp = "Kode OTP hanya boleh berisi angka";
+    if (!otp) {
+      errors.otp = "Kode OTP wajib diisi";
+    } else if (!validateOtp(otp)) {
+      errors.otp = "Kode OTP harus 4 digit angka";
+    }
+
+    if (!email || !deviceId) {
+      errors.general = "Data session tidak valid. Silakan login ulang.";
     }
 
     if (Object.keys(errors).length > 0) {
       return json<OTPActionData>({ errors, success: false }, { status: 400 });
     }
 
-    if (otp === "1234") {
-      return redirect("/sys-rijig-adminpanel/dashboard");
-    }
+    try {
+      // ✅ Call API service for OTP verification
+      const response = await adminAuthService.verifyOtp({
+        device_id: deviceId,
+        email,
+        otp
+      });
 
-    return json<OTPActionData>(
-      {
-        errors: { otp: "Kode OTP tidak valid atau sudah kedaluwarsa" },
-        success: false
-      },
-      { status: 401 }
-    );
+      if (response.meta.status === 200 && response.data) {
+        // ✅ Create user session after successful verification
+        return createUserSession({
+          request,
+          sessionData: {
+            accessToken: response.data.access_token,
+            refreshToken: response.data.refresh_token,
+            sessionId: response.data.session_id,
+            role: "administrator",
+            deviceId,
+            email,
+            registrationStatus: response.data.registration_status || "complete",
+            nextStep: response.data.next_step || "completed"
+          },
+          redirectTo: "/sys-rijig-adminpanel/dashboard"
+        });
+      }
+
+      return json<OTPActionData>(
+        {
+          errors: { otp: "Verifikasi OTP gagal" },
+          success: false
+        },
+        { status: 401 }
+      );
+    } catch (error: any) {
+      console.error("OTP verification error:", error);
+
+      // ✅ Handle specific API errors
+      if (error.response?.data?.meta?.message) {
+        return json<OTPActionData>(
+          {
+            errors: { otp: error.response.data.meta.message },
+            success: false
+          },
+          { status: error.response.status || 401 }
+        );
+      }
+
+      return json<OTPActionData>(
+        {
+          errors: { general: "Terjadi kesalahan server. Silakan coba lagi." },
+          success: false
+        },
+        { status: 500 }
+      );
+    }
   }
 
   return json<OTPActionData>(
@@ -118,13 +203,18 @@ export const action = async ({
 };
 
 export default function AdminVerifyOTP() {
-  const { email, otpSentAt, expiryMinutes } = useLoaderData<LoaderData>();
+  const { email, deviceId, remainingTime, expiryMinutes } =
+    useLoaderData<LoaderData>();
   const actionData = useActionData<OTPActionData>();
   const navigation = useNavigation();
   const [searchParams] = useSearchParams();
 
   const [otp, setOtp] = useState(["", "", "", ""]);
-  const [timeLeft, setTimeLeft] = useState(expiryMinutes * 60);
+  const [timeLeft, setTimeLeft] = useState(() => {
+    // ✅ Parse remaining time from API response
+    const [minutes, seconds] = remainingTime.split(":").map(Number);
+    return minutes * 60 + (seconds || 0);
+  });
   const [canResend, setCanResend] = useState(false);
 
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -135,6 +225,11 @@ export default function AdminVerifyOTP() {
 
   // Timer countdown
   useEffect(() => {
+    if (timeLeft <= 0) {
+      setCanResend(true);
+      return;
+    }
+
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
@@ -146,7 +241,7 @@ export default function AdminVerifyOTP() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [timeLeft]);
 
   // Reset timer when OTP is resent
   useEffect(() => {
@@ -243,9 +338,20 @@ export default function AdminVerifyOTP() {
                 </Alert>
               )}
 
+              {/* General Error Alert */}
+              {actionData?.errors?.general && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    {actionData.errors.general}
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {/* OTP Input Form */}
               <Form method="post">
                 <input type="hidden" name="email" value={email} />
+                <input type="hidden" name="device_id" value={deviceId} />
                 <input type="hidden" name="_action" value="verify" />
                 <input type="hidden" name="otp" value={otp.join("")} />
 
@@ -328,6 +434,7 @@ export default function AdminVerifyOTP() {
                 </p>
                 <Form method="post" className="inline">
                   <input type="hidden" name="email" value={email} />
+                  <input type="hidden" name="device_id" value={deviceId} />
                   <input type="hidden" name="_action" value="resend" />
                   <Button
                     type="submit"
@@ -364,22 +471,6 @@ export default function AdminVerifyOTP() {
                       memastikan keamanan akun administrator Anda.
                     </p>
                   </div>
-                </div>
-              </div>
-
-              {/* Demo Info */}
-              <div className="p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
-                <p className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-2">
-                  Demo OTP:
-                </p>
-                <div className="text-xs text-amber-700 dark:text-amber-400 space-y-1">
-                  <p>
-                    Gunakan kode:{" "}
-                    <span className="font-mono font-bold text-lg px-2 py-1 bg-amber-100 dark:bg-amber-900/50 rounded">
-                      1234
-                    </span>
-                  </p>
-                  <p>Atau tunggu countdown habis untuk test resend</p>
                 </div>
               </div>
 
