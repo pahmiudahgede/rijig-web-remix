@@ -3,7 +3,6 @@ import { Link, useLocation } from "@remix-run/react";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { ScrollArea } from "~/components/ui/scroll-area";
-import { Separator } from "~/components/ui/separator";
 import {
   Collapsible,
   CollapsibleContent,
@@ -19,21 +18,12 @@ import {
   LayoutDashboard,
   Recycle,
   Users,
-  TrendingUp,
   FileText,
-  CreditCard,
-  BarChart3,
   Settings,
-  MessageCircle,
   MapPin,
-  Package,
-  DollarSign,
   UserCheck,
-  Building2,
   Newspaper,
   HelpCircle,
-  Bell,
-  Shield,
   ChevronDown,
   X
 } from "lucide-react";
@@ -62,196 +52,57 @@ const menuItems: MenuItem[] = [
   {
     title: "Dashboard",
     icon: <LayoutDashboard className="w-5 h-5" />,
-    children: [
-      {
-        title: "Overview",
-        href: "/sys-rijig-adminpanel/dashboard"
-      },
-      { title: "Analytics", href: "/admin/analytics" },
-      { title: "Statistik Sampah", href: "/admin/waste-stats", badge: "new" },
-      { title: "Laporan Harian", href: "/admin/daily-reports" }
-    ]
+    href: "/sys-rijig-adminpanel/dashboard"
   },
   {
     title: "Data Sampah",
     icon: <Recycle className="w-5 h-5" />,
-    children: [
-      { title: "Jenis Sampah", href: "/sys-rijig-adminpanel/dashboard/waste" },
-      { title: "Harga Sampah", href: "/admin/waste-prices" },
-      { title: "Volume Sampah", href: "/admin/waste-volume" },
-      { title: "Tracking Sampah", href: "/admin/waste-tracking", badge: "new" },
-      { title: "Kualitas Sampah", href: "/admin/waste-quality" }
-    ]
+    href: "/sys-rijig-adminpanel/dashboard/waste"
   },
   {
     title: "Manajemen User",
     icon: <Users className="w-5 h-5" />,
     children: [
-      { title: "Masyarakat", href: "/admin/users/community" },
-      { title: "Pengepul", href: "/admin/users/collectors" },
-      { title: "Pengelola Daur Ulang", href: "/admin/users/recyclers" },
       {
         title: "Verifikasi User",
         href: "/sys-rijig-adminpanel/dashboard/users",
         badge: "urgent"
       },
-      { title: "Rating & Review", href: "/admin/users/reviews" }
-    ]
-  },
-  {
-    title: "Transaksi",
-    icon: <CreditCard className="w-5 h-5" />,
-    children: [
-      { title: "Semua Transaksi", href: "/admin/transactions/all" },
       {
-        title: "Pembayaran Pending",
-        href: "/admin/transactions/pending",
-        badge: "urgent"
+        title: "Masyarakat",
+        href: "/sys-rijig-adminpanel/masyarakat"
       },
-      { title: "Riwayat Pembayaran", href: "/admin/transactions/history" },
-      { title: "Komisi & Fee", href: "/admin/transactions/commission" },
       {
-        title: "Laporan Keuangan",
-        href: "/admin/transactions/financial-report"
+        title: "Pengepul",
+        href: "/sys-rijig-adminpanel/pengepul"
+      },
+      {
+        title: "Pengelola",
+        href: "/sys-rijig-adminpanel/pengelola"
       }
     ]
-  }
-];
-
-const contentMenuItems: MenuItem[] = [
-  {
-    title: "Content Management",
-    icon: <FileText className="w-5 h-5" />,
-    children: [
-      { title: "Artikel & Blog", href: "/sys-rijig-adminpanel/dashboard/artikel-blog" },
-      { title: "Tips & Panduan", href: "/sys-rijig-adminpanel/dashboard/tips-panduan" },
-      { title: "FAQ", href: "/admin/content/faq" },
-      {
-        title: "Pengumuman",
-        href: "/admin/content/announcements",
-        badge: "new"
-      },
-      { title: "Testimoni", href: "/admin/content/testimonials" }
-    ]
   },
   {
-    title: "Lokasi & Mapping",
-    icon: <MapPin className="w-5 h-5" />,
-    children: [
-      { title: "Peta Pengepul", href: "/admin/mapping/collectors" },
-      { title: "Area Coverage", href: "/sys-rijig-adminpanel/dashboard/areacoverage" },
-      { title: "Titik Pengumpulan", href: "/admin/mapping/collection-points" },
-      { title: "Rute Optimal", href: "/admin/mapping/routes", badge: "new" }
-    ]
+    title: "Artikel & Blog",
+    icon: <Newspaper className="w-5 h-5" />,
+    href: "/sys-rijig-adminpanel/dashboard/artikel-blog"
   },
   {
-    title: "Notifikasi",
-    icon: <Bell className="w-5 h-5" />,
-    children: [
-      { title: "Push Notifications", href: "/admin/notifications/push" },
-      { title: "Email Broadcast", href: "/admin/notifications/email" },
-      { title: "SMS Gateway", href: "/admin/notifications/sms" },
-      { title: "Template Pesan", href: "/admin/notifications/templates" }
-    ]
-  }
-];
-
-const analyticsMenuItems: MenuItem[] = [
-  {
-    title: "Reports & Analytics",
-    icon: <BarChart3 className="w-5 h-5" />,
-    children: [
-      { title: "Laporan Bulanan", href: "/admin/reports/monthly" },
-      {
-        title: "Performa Pengepul",
-        href: "/admin/reports/collector-performance"
-      },
-      { title: "Tren Harga", href: "/admin/reports/price-trends" },
-      {
-        title: "Dampak Lingkungan",
-        href: "/admin/reports/environmental-impact",
-        badge: "new"
-      },
-      { title: "ROI Analysis", href: "/admin/reports/roi-analysis" }
-    ]
-  },
-  {
-    title: "Partner & Kerjasama",
-    icon: <Building2 className="w-5 h-5" />,
-    children: [
-      { title: "Bank Sampah", href: "/admin/partners/waste-banks" },
-      {
-        title: "Industri Daur Ulang",
-        href: "/admin/partners/recycling-industry"
-      },
-      { title: "Pemerintah Daerah", href: "/admin/partners/government" },
-      { title: "NGO & Komunitas", href: "/admin/partners/ngo-community" }
-    ]
-  },
-  {
-    title: "Support & Help",
+    title: "Tips & Panduan",
     icon: <HelpCircle className="w-5 h-5" />,
-    children: [
-      {
-        title: "Tiket Support",
-        href: "/admin/support/tickets",
-        badge: "urgent"
-      },
-      { title: "Live Chat", href: "/admin/support/chat" },
-      { title: "Knowledge Base", href: "/admin/support/knowledge-base" },
-      { title: "Training Materials", href: "/admin/support/training" }
-    ]
+    href: "/sys-rijig-adminpanel/dashboard/tips-panduan"
+  },
+  {
+    title: "Area Coverage",
+    icon: <MapPin className="w-5 h-5" />,
+    href: "/sys-rijig-adminpanel/dashboard/areacoverage"
   },
   {
     title: "Pengaturan",
     icon: <Settings className="w-5 h-5" />,
-    children: [
-      { title: "Konfigurasi Sistem", href: "/sys-rijig-adminpanel/dashboard/pengaturan" },
-      { title: "Pengaturan Harga", href: "/admin/settings/pricing" },
-      {
-        title: "Role & Permission",
-        href: "/admin/settings/roles",
-        badge: "pro"
-      },
-      { title: "Backup & Restore", href: "/admin/settings/backup" },
-      { title: "API Management", href: "/admin/settings/api", badge: "pro" }
-    ]
+    href: "/sys-rijig-adminpanel/dashboard/pengaturan"
   }
 ];
-
-function MenuSection({
-  title,
-  items,
-  isCollapsed,
-  isHovered
-}: {
-  title: string;
-  items: MenuItem[];
-  isCollapsed: boolean;
-  isHovered: boolean;
-}) {
-  const showText = !isCollapsed || isHovered;
-
-  return (
-    <div className="space-y-2">
-      {showText && (
-        <h3 className="mb-4 px-3 text-xs uppercase text-gray-500 dark:text-gray-300 font-semibold tracking-wider">
-          {title}
-        </h3>
-      )}
-      <ul className="space-y-1">
-        {items.map((item, index) => (
-          <MenuItemComponent
-            key={index}
-            item={item}
-            isCollapsed={isCollapsed}
-            isHovered={isHovered}
-          />
-        ))}
-      </ul>
-    </div>
-  );
-}
 
 function MenuItemComponent({
   item,
@@ -292,7 +143,8 @@ function MenuItemComponent({
                 variant="ghost"
                 className={cn(
                   "w-full h-12 p-0 justify-center transition-colors",
-                  isChildActive && "bg-green-100 dark:bg-green-900/30"
+                  (isChildActive || pathname === item.href) &&
+                    "bg-green-100 dark:bg-green-900/30"
                 )}
                 asChild={!hasChildren}
               >
@@ -437,33 +289,55 @@ function MenuItemComponent({
         asChild
         variant="ghost"
         className={cn(
-          "w-full justify-start px-3 py-2.5 h-auto transition-colors",
+          "w-full justify-between px-3 py-2.5 h-auto transition-colors",
           "hover:bg-gray-100 dark:hover:bg-gray-700",
           isActive &&
             "bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-400 dark:hover:bg-green-900/50"
         )}
       >
         <Link to={item.href || "#"}>
-          <div className="flex items-center gap-3">
-            <span
-              className={cn(
-                "transition-colors",
-                isActive
-                  ? "text-green-600 dark:text-green-400"
-                  : "text-gray-700 dark:text-gray-100"
-              )}
-            >
-              {item.icon}
-            </span>
-            {showText && (
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center gap-3">
               <span
                 className={cn(
-                  "text-sm font-medium text-gray-900 dark:text-gray-100",
-                  isActive && "text-green-700 dark:text-green-400"
+                  "transition-colors",
+                  isActive
+                    ? "text-green-600 dark:text-green-400"
+                    : "text-gray-700 dark:text-gray-100"
                 )}
               >
-                {item.title}
+                {item.icon}
               </span>
+              {showText && (
+                <span
+                  className={cn(
+                    "text-sm font-medium text-gray-900 dark:text-gray-100",
+                    isActive && "text-green-700 dark:text-green-400"
+                  )}
+                >
+                  {item.title}
+                </span>
+              )}
+            </div>
+            {showText && item.badge && (
+              <Badge
+                variant={
+                  item.badge === "urgent"
+                    ? "destructive"
+                    : item.badge === "pro"
+                    ? "secondary"
+                    : "default"
+                }
+                className={cn(
+                  "text-xs ml-2",
+                  item.badge === "urgent" &&
+                    "bg-red-100 text-red-700 hover:bg-red-200",
+                  item.badge === "new" &&
+                    "bg-green-100 text-green-700 hover:bg-green-200"
+                )}
+              >
+                {item.badge}
+              </Badge>
             )}
           </div>
         </Link>
@@ -500,12 +374,15 @@ export function AdminSidebar({
       {/* Logo */}
       <div className="h-16 flex items-center justify-between px-4 border-b border-gray-200 dark:border-gray-700">
         {showText && (
-          <Link to="/admin/dashboard" className="flex items-center gap-2">
+          <Link
+            to="/sys-rijig-adminpanel/dashboard"
+            className="flex items-center gap-2"
+          >
             <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center text-white text-sm font-bold">
               ♻️
             </div>
             <div className="text-lg font-bold text-gray-900 dark:text-white">
-              RIjig Admin
+              Rijig Admin
             </div>
           </Link>
         )}
@@ -530,25 +407,25 @@ export function AdminSidebar({
 
       {/* Navigation */}
       <ScrollArea className="flex-1 h-[calc(100vh-64px)]">
-        <div className="py-6 px-3 space-y-6">
-          <MenuSection
-            title="Core Management"
-            items={menuItems}
-            isCollapsed={isCollapsed}
-            isHovered={isHovered}
-          />
-          <MenuSection
-            title="Content & Communications"
-            items={contentMenuItems}
-            isCollapsed={isCollapsed}
-            isHovered={isHovered}
-          />
-          <MenuSection
-            title="Analytics & Administration"
-            items={analyticsMenuItems}
-            isCollapsed={isCollapsed}
-            isHovered={isHovered}
-          />
+        <div className="py-6 px-3">
+          {/* Main Menu */}
+          <div className="space-y-1">
+            {showText && (
+              <h3 className="mb-4 px-3 text-xs uppercase text-gray-500 dark:text-gray-300 font-semibold tracking-wider">
+                Admin Panel
+              </h3>
+            )}
+            <ul className="space-y-1">
+              {menuItems.map((item, index) => (
+                <MenuItemComponent
+                  key={index}
+                  item={item}
+                  isCollapsed={isCollapsed}
+                  isHovered={isHovered}
+                />
+              ))}
+            </ul>
+          </div>
         </div>
 
         {/* Footer CTA - Only show when not collapsed or when hovered */}
@@ -557,7 +434,7 @@ export function AdminSidebar({
             <div className="flex items-center gap-2 mb-2">
               <Recycle className="w-4 h-4 text-green-600 dark:text-green-400" />
               <h4 className="font-semibold text-green-900 dark:text-green-100 text-sm">
-                RIjig Dashboard
+                Rijig Dashboard
               </h4>
             </div>
             <p className="mb-4 text-green-700 dark:text-green-200 text-xs">

@@ -19,8 +19,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 }
 
-// pada kode app/routes/pengelola.tsx pada bagian:
-
 export default function PengelolaPanelLayout() {
   const { user } = useLoaderData<LoaderData>();
   return (
@@ -29,7 +27,3 @@ export default function PengelolaPanelLayout() {
     </PengelolaLayoutWrapper>
   );
 }
-
-
-/* terdapat error ini: Type '{ children: Element; user: SessionData; }' is not assignable to type 'IntrinsicAttributes & PengelolaLayoutWrapperProps'.
-  Property 'user' does not exist on type 'IntrinsicAttributes & PengelolaLayoutWrapperProps'.  */

@@ -1,13 +1,17 @@
-// app/components/layoutadmin/layout-wrapper.tsx
 import { useState, useEffect } from "react";
 import { AdminSidebar } from "./sidebar";
 import { AdminHeader } from "./header";
+import { SessionData } from "~/sessions.server";
 
 interface AdminLayoutWrapperProps {
   children: React.ReactNode;
+  user: SessionData;
 }
 
-export function AdminLayoutWrapper({ children }: AdminLayoutWrapperProps) {
+export function AdminLayoutWrapper({
+  children,
+  user
+}: AdminLayoutWrapperProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -69,6 +73,7 @@ export function AdminLayoutWrapper({ children }: AdminLayoutWrapperProps) {
           onMenuClick={handleToggleSidebar}
           sidebarCollapsed={sidebarCollapsed}
           isMobile={isMobile}
+          user={user}
         />
 
         {/* Page content */}
