@@ -12,9 +12,12 @@ import {
   Linkedin,
   Instagram,
   Recycle,
-  ArrowUp
+  ArrowUp,
+  ArrowRight,
+  User
 } from "lucide-react";
 import { ModeToggle } from "~/components/ui/dark-mode-toggle";
+import { getUserSession } from "~/sessions.server";
 
 export const meta: MetaFunction = () => {
   return [
@@ -44,10 +47,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     { name: "Instagram", icon: "instagram", href: "#" }
   ];
 
+  // Get real user session
+  const userSession = await getUserSession(request);
+
   const authData = {
-    isAuthenticated: false,
-    isRegistrationComplete: false,
-    userRole: null as string | null
+    isAuthenticated: !!userSession,
+    isRegistrationComplete: userSession?.registrationStatus === "complete",
+    userRole: userSession?.role || null,
+    userPhone: userSession?.phone || null,
+    userEmail: userSession?.email || null
   };
 
   return json({
@@ -65,7 +73,13 @@ export default function LandingLayout() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [showBackToTop, setShowBackToTop] = useState(false);
 
-  const { isAuthenticated, isRegistrationComplete, userRole } = authData;
+  const {
+    isAuthenticated,
+    isRegistrationComplete,
+    userRole,
+    userPhone,
+    userEmail
+  } = authData;
 
   useEffect(() => {
     const handleScroll = () => {
@@ -100,37 +114,56 @@ export default function LandingLayout() {
     }
   };
 
-  const getRedirectPath = () => {
+  const getDashboardPath = () => {
     if (userRole === "administrator") {
       return "/sys-rijig-adminpanel/dashboard";
     }
     return "/pengelola/dashboard";
   };
 
-  const handleGetStarted = () => {
+  const handleMainAction = () => {
     if (isAuthenticated && isRegistrationComplete) {
-      const dashboardPath =
-        userRole === "administrator"
-          ? "/sys-rijig-adminpanel/dashboard"
-          : "/pengelola/dashboard";
-      navigate(dashboardPath);
+      // User sudah login dan registrasi complete → Go to Dashboard
+      navigate(getDashboardPath());
     } else if (isAuthenticated && !isRegistrationComplete) {
-      const redirectPath = getRedirectPath();
-      navigate(redirectPath);
+      // User sudah login tapi registrasi belum complete → Redirect ke step berikutnya
+      navigate(getDashboardPath());
     } else {
-      navigate("/pengelola/register");
+      // User belum login → Get Started (redirect ke authpengelola)
+      navigate("/authpengelola");
     }
-  };
-
-  const handleAdminLogin = () => {
-    navigate("/sys-rijig-adminpanel/login");
   };
 
   const getButtonText = () => {
     if (isAuthenticated && isRegistrationComplete) {
       return "Go to Dashboard";
+    } else if (isAuthenticated && !isRegistrationComplete) {
+      return "Continue Setup";
     }
     return "Get Started";
+  };
+
+  const getButtonIcon = () => {
+    if (isAuthenticated) {
+      return <User className="ml-2 h-4 w-4" />;
+    }
+    return <ArrowRight className="ml-2 h-4 w-4" />;
+  };
+
+  // Format phone display
+  const formatPhone = (phone: string) => {
+    if (phone.length <= 2) return phone;
+    if (phone.length <= 5)
+      return `${phone.substring(0, 2)} ${phone.substring(2)}`;
+    if (phone.length <= 9)
+      return `${phone.substring(0, 2)} ${phone.substring(
+        2,
+        5
+      )} ${phone.substring(5)}`;
+    return `${phone.substring(0, 2)} ${phone.substring(2, 5)} ${phone.substring(
+      5,
+      9
+    )} ${phone.substring(9)}`;
   };
 
   return (
@@ -213,6 +246,26 @@ export default function LandingLayout() {
 
             {/* Right Side Actions */}
             <div className="hidden lg:flex items-center space-x-4">
+              {/* User Info (if authenticated) */}
+              {isAuthenticated && (
+                <div
+                  className={`text-sm transition-all duration-700 ${
+                    isScrolled
+                      ? "text-gray-600 dark:text-gray-300"
+                      : "text-white/80 dark:text-white/80"
+                  }`}
+                >
+                  <div className="text-right">
+                    <div className="font-medium">
+                      {userRole === "administrator" ? "Admin" : "Pengelola"}
+                    </div>
+                    <div className="text-xs">
+                      {userPhone ? formatPhone(userPhone) : userEmail}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div
                 className={`transition-all duration-700 ${
                   isScrolled
@@ -222,8 +275,9 @@ export default function LandingLayout() {
               >
                 <ModeToggle />
               </div>
+
               <Button
-                onClick={handleGetStarted}
+                onClick={handleMainAction}
                 className={`transition-all duration-700 shadow-lg hover:scale-105 rounded-lg ${
                   isScrolled
                     ? "bg-green-600 hover:bg-green-700 text-white shadow-green-600/20"
@@ -231,6 +285,7 @@ export default function LandingLayout() {
                 }`}
               >
                 {getButtonText()}
+                {getButtonIcon()}
               </Button>
             </div>
           </div>
@@ -251,6 +306,35 @@ export default function LandingLayout() {
               }`}
             >
               <nav className="space-y-4 p-4">
+                {/* User Info Mobile (if authenticated) */}
+                {isAuthenticated && (
+                  <>
+                    <div
+                      className={`text-center text-sm transition-all duration-700 ${
+                        isScrolled
+                          ? "text-gray-600 dark:text-gray-300"
+                          : "text-white/80 dark:text-white/80"
+                      }`}
+                    >
+                      <div className="font-medium">
+                        {userRole === "administrator"
+                          ? "Administrator"
+                          : "Pengelola"}
+                      </div>
+                      <div className="text-xs">
+                        {userPhone ? formatPhone(userPhone) : userEmail}
+                      </div>
+                    </div>
+                    <Separator
+                      className={`my-4 ${
+                        isScrolled
+                          ? "bg-gray-200/60 dark:bg-gray-700/60"
+                          : "bg-white/40 dark:bg-gray-700/40"
+                      }`}
+                    />
+                  </>
+                )}
+
                 {navigationItems.map((item) => (
                   <button
                     key={item.href}
@@ -285,7 +369,7 @@ export default function LandingLayout() {
                     <ModeToggle />
                   </div>
                   <Button
-                    onClick={handleGetStarted}
+                    onClick={handleMainAction}
                     size="sm"
                     className={`hover:scale-105 transition-all duration-700 rounded-lg ${
                       isScrolled
@@ -294,6 +378,7 @@ export default function LandingLayout() {
                     }`}
                   >
                     {getButtonText()}
+                    {getButtonIcon()}
                   </Button>
                 </div>
               </nav>
@@ -360,14 +445,6 @@ export default function LandingLayout() {
                     aria-label="Facebook"
                   >
                     <Facebook className="h-5 w-5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-white hover:text-white/80 hover:bg-green-700 transition-all hover:scale-110 rounded-lg"
-                    aria-label="Twitter"
-                  >
-                    <Twitter className="h-5 w-5" />
                   </Button>
                   <Button
                     variant="ghost"

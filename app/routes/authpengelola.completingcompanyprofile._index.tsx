@@ -35,8 +35,13 @@ import {
   MapPin,
   User,
   FileText,
-  Phone
+  Phone,
+  Upload,
+  Image as ImageIcon
 } from "lucide-react";
+import { formatDateToDDMMYYYY, validatePhoneNumber } from "~/utils/auth-utils";
+import pengelolaAuthService from "~/services/auth/pengelola.service";
+import { getUserSession, createUserSession } from "~/sessions.server";
 
 // Progress Indicator Component
 const ProgressIndicator = ({ currentStep = 3, totalSteps = 5 }) => {
@@ -79,20 +84,20 @@ const ProgressIndicator = ({ currentStep = 3, totalSteps = 5 }) => {
 
 // Interfaces
 interface LoaderData {
-  phone: string;
+  userSession: any;
 }
 
 interface CompanyProfileActionData {
   errors?: {
-    companyName?: string;
-    ownerName?: string;
-    companyType?: string;
-    address?: string;
-    city?: string;
-    postalCode?: string;
-    businessType?: string;
-    employeeCount?: string;
-    serviceArea?: string;
+    companyname?: string;
+    companyaddress?: string;
+    companyphone?: string;
+    companyemail?: string;
+    companywebsite?: string;
+    taxid?: string;
+    foundeddate?: string;
+    companytype?: string;
+    companydescription?: string;
     general?: string;
   };
   success?: boolean;
@@ -101,98 +106,177 @@ interface CompanyProfileActionData {
 export const loader = async ({
   request
 }: LoaderFunctionArgs): Promise<Response> => {
-  const url = new URL(request.url);
-  const phone = url.searchParams.get("phone");
+  const userSession = await getUserSession(request);
 
-  if (!phone) {
-    return redirect("/authpengelola/requestotpforregister");
+  // Check if user is authenticated and has pengelola role
+  if (!userSession || userSession.role !== "pengelola") {
+    return redirect("/authpengelola");
   }
 
-  return json<LoaderData>({ phone });
+  // Check if user should be on this step
+  if (userSession.registrationStatus !== "uncomplete") {
+    // Redirect based on current status
+    switch (userSession.registrationStatus) {
+      case "awaiting_approval":
+        return redirect("/authpengelola/waitingapprovalfromadministrator");
+      case "approved":
+        return redirect("/authpengelola/createanewpin");
+      case "complete":
+        return redirect("/pengelola/dashboard");
+      default:
+        break;
+    }
+  }
+
+  return json<LoaderData>({ userSession });
 };
 
 export const action = async ({
   request
 }: ActionFunctionArgs): Promise<Response> => {
-  const formData = await request.formData();
-  const phone = formData.get("phone") as string;
+  const userSession = await getUserSession(request);
 
-  // Extract form data
+  if (!userSession || userSession.role !== "pengelola") {
+    return redirect("/authpengelola");
+  }
+
+  const formData = await request.formData();
+
+  // Extract form data sesuai dengan API requirements
   const companyData = {
-    companyName: formData.get("companyName") as string,
-    ownerName: formData.get("ownerName") as string,
-    companyType: formData.get("companyType") as string,
-    address: formData.get("address") as string,
-    city: formData.get("city") as string,
-    postalCode: formData.get("postalCode") as string,
-    businessType: formData.get("businessType") as string,
-    employeeCount: formData.get("employeeCount") as string,
-    serviceArea: formData.get("serviceArea") as string,
-    description: formData.get("description") as string
+    companyname: formData.get("companyname") as string,
+    companyaddress: formData.get("companyaddress") as string,
+    companyphone: formData.get("companyphone") as string,
+    companyemail: formData.get("companyemail") as string,
+    companywebsite: formData.get("companywebsite") as string,
+    taxid: formData.get("taxid") as string,
+    foundeddate: formData.get("foundeddate") as string,
+    companytype: formData.get("companytype") as string,
+    companydescription: formData.get("companydescription") as string,
+    company_logo: formData.get("company_logo") as File | null
   };
 
   // Validation
   const errors: { [key: string]: string } = {};
 
-  if (!companyData.companyName?.trim()) {
-    errors.companyName = "Nama perusahaan wajib diisi";
+  if (!companyData.companyname?.trim()) {
+    errors.companyname = "Nama perusahaan wajib diisi";
   }
 
-  if (!companyData.ownerName?.trim()) {
-    errors.ownerName = "Nama pemilik/direktur wajib diisi";
+  if (!companyData.companyaddress?.trim()) {
+    errors.companyaddress = "Alamat perusahaan wajib diisi";
   }
 
-  if (!companyData.companyType) {
-    errors.companyType = "Jenis badan usaha wajib dipilih";
+  if (!companyData.companyphone?.trim()) {
+    errors.companyphone = "Nomor telepon perusahaan wajib diisi";
+  } else if (!validatePhoneNumber(companyData.companyphone)) {
+    errors.companyphone =
+      "Format nomor telepon tidak valid (gunakan format 628xxxxxxxxx)";
   }
 
-  if (!companyData.address?.trim()) {
-    errors.address = "Alamat lengkap wajib diisi";
+  if (!companyData.companyemail?.trim()) {
+    errors.companyemail = "Email perusahaan wajib diisi";
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyData.companyemail)) {
+    errors.companyemail = "Format email tidak valid";
   }
 
-  if (!companyData.city?.trim()) {
-    errors.city = "Kota wajib diisi";
+  if (!companyData.companywebsite?.trim()) {
+    errors.companywebsite = "Website perusahaan wajib diisi";
+  } else if (!/^https?:\/\/.+\..+/.test(companyData.companywebsite)) {
+    errors.companywebsite =
+      "Format website tidak valid (harus dimulai dengan http:// atau https://)";
   }
 
-  if (!companyData.postalCode?.trim()) {
-    errors.postalCode = "Kode pos wajib diisi";
-  } else if (!/^\d{5}$/.test(companyData.postalCode)) {
-    errors.postalCode = "Kode pos harus 5 digit angka";
+  if (!companyData.taxid?.trim()) {
+    errors.taxid = "NPWP/Tax ID wajib diisi";
   }
 
-  if (!companyData.businessType) {
-    errors.businessType = "Jenis usaha wajib dipilih";
+  if (!companyData.foundeddate?.trim()) {
+    errors.foundeddate = "Tanggal berdiri wajib diisi";
+  } else {
+    // Validate date format DD-MM-YYYY
+    const dateRegex = /^\d{2}-\d{2}-\d{4}$/;
+    if (!dateRegex.test(companyData.foundeddate)) {
+      errors.foundeddate = "Format tanggal harus DD-MM-YYYY";
+    }
   }
 
-  if (!companyData.employeeCount) {
-    errors.employeeCount = "Jumlah karyawan wajib dipilih";
+  if (!companyData.companytype?.trim()) {
+    errors.companytype = "Jenis perusahaan wajib dipilih";
   }
 
-  if (!companyData.serviceArea?.trim()) {
-    errors.serviceArea = "Area layanan wajib diisi";
+  if (!companyData.companydescription?.trim()) {
+    errors.companydescription = "Deskripsi perusahaan wajib diisi";
   }
 
   if (Object.keys(errors).length > 0) {
     return json<CompanyProfileActionData>({ errors }, { status: 400 });
   }
 
-  // Simulasi menyimpan data - dalam implementasi nyata, simpan ke database
   try {
-    console.log("Saving company profile:", { phone, ...companyData });
+    // Prepare data untuk API call
+    const apiData = {
+      companyname: companyData.companyname.trim(),
+      companyaddress: companyData.companyaddress.trim(),
+      companyphone: companyData.companyphone.trim(),
+      companyemail: companyData.companyemail.trim(),
+      companywebsite: companyData.companywebsite.trim(),
+      taxid: companyData.taxid.trim(),
+      foundeddate: companyData.foundeddate.trim(),
+      companytype: companyData.companytype.trim(),
+      companydescription: companyData.companydescription.trim(),
+      ...(companyData.company_logo && {
+        company_logo: companyData.company_logo
+      })
+    };
 
-    // Simulasi delay API call
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Call API untuk create company profile
+    const response = await pengelolaAuthService.createCompanyProfile(apiData);
 
-    // Redirect ke step berikutnya
-    return redirect(
-      `/authpengelola/waitingapprovalfromadministrator?phone=${encodeURIComponent(
-        phone
-      )}`
-    );
-  } catch (error) {
+    if (response.meta.status === 200 && response.data) {
+      // Update session dengan data terbaru
+      return createUserSession({
+        request,
+        sessionData: {
+          ...userSession,
+          accessToken: response.data.access_token,
+          refreshToken: response.data.refresh_token,
+          sessionId: response.data.session_id,
+          tokenType: response.data.token_type,
+          registrationStatus: response.data.registration_status,
+          nextStep: response.data.next_step
+        },
+        redirectTo: "/authpengelola/waitingapprovalfromadministrator"
+      });
+    } else {
+      return json<CompanyProfileActionData>(
+        {
+          errors: {
+            general:
+              response.meta.message || "Gagal menyimpan profil perusahaan"
+          }
+        },
+        { status: 400 }
+      );
+    }
+  } catch (error: any) {
+    console.error("Create company profile error:", error);
+
+    // Handle specific API errors
+    if (error.response?.data?.meta?.message) {
+      return json<CompanyProfileActionData>(
+        {
+          errors: { general: error.response.data.meta.message }
+        },
+        { status: error.response.status || 500 }
+      );
+    }
+
     return json<CompanyProfileActionData>(
       {
-        errors: { general: "Gagal menyimpan data. Silakan coba lagi." }
+        errors: {
+          general: "Gagal menyimpan profil perusahaan. Silakan coba lagi."
+        }
       },
       { status: 500 }
     );
@@ -200,11 +284,38 @@ export const action = async ({
 };
 
 export default function CompletingCompanyProfile() {
-  const { phone } = useLoaderData<LoaderData>();
+  const { userSession } = useLoaderData<LoaderData>();
   const actionData = useActionData<CompanyProfileActionData>();
   const navigation = useNavigation();
 
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+
   const isSubmitting = navigation.state === "submitting";
+
+  // Handle logo file change
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith("image/")) {
+        alert("File harus berupa gambar");
+        return;
+      }
+
+      // Validate file size (max 2MB)
+      if (file.size > 2 * 1024 * 1024) {
+        alert("Ukuran file maksimal 2MB");
+        return;
+      }
+
+      // Create preview
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setLogoPreview(event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -235,9 +346,11 @@ export default function CompletingCompanyProfile() {
           )}
 
           {/* Form */}
-          <Form method="post" className="space-y-6">
-            <input type="hidden" name="phone" value={phone} />
-
+          <Form
+            method="post"
+            encType="multipart/form-data"
+            className="space-y-6"
+          >
             {/* Company Information Section */}
             <div className="space-y-4">
               <div className="flex items-center space-x-2 mb-4">
@@ -249,246 +362,214 @@ export default function CompletingCompanyProfile() {
 
               {/* Company Name */}
               <div className="space-y-2">
-                <Label htmlFor="companyName">Nama Perusahaan *</Label>
+                <Label htmlFor="companyname">Nama Perusahaan *</Label>
                 <Input
-                  id="companyName"
-                  name="companyName"
+                  id="companyname"
+                  name="companyname"
                   type="text"
                   placeholder="PT/CV/Koperasi Nama Perusahaan"
                   className={
-                    actionData?.errors?.companyName ? "border-red-500" : ""
+                    actionData?.errors?.companyname ? "border-red-500" : ""
                   }
                   required
                 />
-                {actionData?.errors?.companyName && (
+                {actionData?.errors?.companyname && (
                   <p className="text-sm text-red-600">
-                    {actionData.errors.companyName}
+                    {actionData.errors.companyname}
                   </p>
                 )}
               </div>
 
-              {/* Owner Name */}
+              {/* Company Address */}
               <div className="space-y-2">
-                <Label htmlFor="ownerName">Nama Pemilik/Direktur *</Label>
-                <Input
-                  id="ownerName"
-                  name="ownerName"
-                  type="text"
-                  placeholder="Nama lengkap pemilik atau direktur"
+                <Label htmlFor="companyaddress">Alamat Perusahaan *</Label>
+                <Textarea
+                  id="companyaddress"
+                  name="companyaddress"
+                  placeholder="Alamat lengkap perusahaan"
                   className={
-                    actionData?.errors?.ownerName ? "border-red-500" : ""
+                    actionData?.errors?.companyaddress ? "border-red-500" : ""
+                  }
+                  rows={3}
+                  required
+                />
+                {actionData?.errors?.companyaddress && (
+                  <p className="text-sm text-red-600">
+                    {actionData.errors.companyaddress}
+                  </p>
+                )}
+              </div>
+
+              {/* Company Phone */}
+              <div className="space-y-2">
+                <Label htmlFor="companyphone">Nomor Telepon Perusahaan *</Label>
+                <Input
+                  id="companyphone"
+                  name="companyphone"
+                  type="text"
+                  placeholder="628xxxxxxxxx"
+                  className={
+                    actionData?.errors?.companyphone ? "border-red-500" : ""
                   }
                   required
                 />
-                {actionData?.errors?.ownerName && (
+                {actionData?.errors?.companyphone && (
                   <p className="text-sm text-red-600">
-                    {actionData.errors.ownerName}
+                    {actionData.errors.companyphone}
+                  </p>
+                )}
+              </div>
+
+              {/* Company Email */}
+              <div className="space-y-2">
+                <Label htmlFor="companyemail">Email Perusahaan *</Label>
+                <Input
+                  id="companyemail"
+                  name="companyemail"
+                  type="email"
+                  placeholder="info@company.com"
+                  className={
+                    actionData?.errors?.companyemail ? "border-red-500" : ""
+                  }
+                  required
+                />
+                {actionData?.errors?.companyemail && (
+                  <p className="text-sm text-red-600">
+                    {actionData.errors.companyemail}
+                  </p>
+                )}
+              </div>
+
+              {/* Company Website */}
+              <div className="space-y-2">
+                <Label htmlFor="companywebsite">Website Perusahaan *</Label>
+                <Input
+                  id="companywebsite"
+                  name="companywebsite"
+                  type="url"
+                  placeholder="https://company.com"
+                  className={
+                    actionData?.errors?.companywebsite ? "border-red-500" : ""
+                  }
+                  required
+                />
+                {actionData?.errors?.companywebsite && (
+                  <p className="text-sm text-red-600">
+                    {actionData.errors.companywebsite}
+                  </p>
+                )}
+              </div>
+
+              {/* Tax ID */}
+              <div className="space-y-2">
+                <Label htmlFor="taxid">NPWP/Tax ID *</Label>
+                <Input
+                  id="taxid"
+                  name="taxid"
+                  type="text"
+                  placeholder="123456789123456"
+                  className={actionData?.errors?.taxid ? "border-red-500" : ""}
+                  required
+                />
+                {actionData?.errors?.taxid && (
+                  <p className="text-sm text-red-600">
+                    {actionData.errors.taxid}
+                  </p>
+                )}
+              </div>
+
+              {/* Founded Date */}
+              <div className="space-y-2">
+                <Label htmlFor="foundeddate">Tanggal Berdiri *</Label>
+                <Input
+                  id="foundeddate"
+                  name="foundeddate"
+                  type="text"
+                  placeholder="DD-MM-YYYY (contoh: 10-09-2015)"
+                  className={
+                    actionData?.errors?.foundeddate ? "border-red-500" : ""
+                  }
+                  required
+                />
+                {actionData?.errors?.foundeddate && (
+                  <p className="text-sm text-red-600">
+                    {actionData.errors.foundeddate}
                   </p>
                 )}
               </div>
 
               {/* Company Type */}
               <div className="space-y-2">
-                <Label htmlFor="companyType">Jenis Badan Usaha *</Label>
-                <Select name="companyType" required>
-                  <SelectTrigger
-                    className={
-                      actionData?.errors?.companyType ? "border-red-500" : ""
-                    }
-                  >
-                    <SelectValue placeholder="Pilih jenis badan usaha" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pt">PT (Perseroan Terbatas)</SelectItem>
-                    <SelectItem value="cv">
-                      CV (Commanditaire Vennootschap)
-                    </SelectItem>
-                    <SelectItem value="koperasi">Koperasi</SelectItem>
-                    <SelectItem value="ud">UD (Usaha Dagang)</SelectItem>
-                    <SelectItem value="firma">Firma</SelectItem>
-                    <SelectItem value="yayasan">Yayasan</SelectItem>
-                    <SelectItem value="other">Lainnya</SelectItem>
-                  </SelectContent>
-                </Select>
-                {actionData?.errors?.companyType && (
-                  <p className="text-sm text-red-600">
-                    {actionData.errors.companyType}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Address Section */}
-            <div className="space-y-4">
-              <div className="flex items-center space-x-2 mb-4">
-                <MapPin className="h-5 w-5 text-gray-600" />
-                <h3 className="text-lg font-medium text-gray-900">
-                  Alamat Perusahaan
-                </h3>
-              </div>
-
-              {/* Address */}
-              <div className="space-y-2">
-                <Label htmlFor="address">Alamat Lengkap *</Label>
-                <Textarea
-                  id="address"
-                  name="address"
-                  placeholder="Jalan, nomor, RT/RW, Kelurahan, Kecamatan"
-                  className={
-                    actionData?.errors?.address ? "border-red-500" : ""
-                  }
-                  rows={3}
-                  required
-                />
-                {actionData?.errors?.address && (
-                  <p className="text-sm text-red-600">
-                    {actionData.errors.address}
-                  </p>
-                )}
-              </div>
-
-              {/* City and Postal Code */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="city">Kota *</Label>
-                  <Input
-                    id="city"
-                    name="city"
-                    type="text"
-                    placeholder="Jakarta/Bandung/Surabaya/dll"
-                    className={actionData?.errors?.city ? "border-red-500" : ""}
-                    required
-                  />
-                  {actionData?.errors?.city && (
-                    <p className="text-sm text-red-600">
-                      {actionData.errors.city}
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="postalCode">Kode Pos *</Label>
-                  <Input
-                    id="postalCode"
-                    name="postalCode"
-                    type="text"
-                    placeholder="12345"
-                    maxLength={5}
-                    className={
-                      actionData?.errors?.postalCode ? "border-red-500" : ""
-                    }
-                    required
-                  />
-                  {actionData?.errors?.postalCode && (
-                    <p className="text-sm text-red-600">
-                      {actionData.errors.postalCode}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Business Information Section */}
-            <div className="space-y-4">
-              <div className="flex items-center space-x-2 mb-4">
-                <FileText className="h-5 w-5 text-gray-600" />
-                <h3 className="text-lg font-medium text-gray-900">
-                  Informasi Usaha
-                </h3>
-              </div>
-
-              {/* Business Type */}
-              <div className="space-y-2">
-                <Label htmlFor="businessType">
-                  Jenis Usaha Pengelolaan Sampah *
-                </Label>
-                <Select name="businessType" required>
-                  <SelectTrigger
-                    className={
-                      actionData?.errors?.businessType ? "border-red-500" : ""
-                    }
-                  >
-                    <SelectValue placeholder="Pilih jenis usaha" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="collection">
-                      Pengumpulan & Pengangkutan
-                    </SelectItem>
-                    <SelectItem value="processing">
-                      Pengolahan & Daur Ulang
-                    </SelectItem>
-                    <SelectItem value="disposal">Pembuangan Akhir</SelectItem>
-                    <SelectItem value="integrated">
-                      Terintegrasi (Semua Layanan)
-                    </SelectItem>
-                    <SelectItem value="consulting">
-                      Konsultan Pengelolaan Sampah
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                {actionData?.errors?.businessType && (
-                  <p className="text-sm text-red-600">
-                    {actionData.errors.businessType}
-                  </p>
-                )}
-              </div>
-
-              {/* Employee Count */}
-              <div className="space-y-2">
-                <Label htmlFor="employeeCount">Jumlah Karyawan *</Label>
-                <Select name="employeeCount" required>
-                  <SelectTrigger
-                    className={
-                      actionData?.errors?.employeeCount ? "border-red-500" : ""
-                    }
-                  >
-                    <SelectValue placeholder="Pilih jumlah karyawan" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1-5">1-5 orang</SelectItem>
-                    <SelectItem value="6-10">6-10 orang</SelectItem>
-                    <SelectItem value="11-25">11-25 orang</SelectItem>
-                    <SelectItem value="26-50">26-50 orang</SelectItem>
-                    <SelectItem value="51-100">51-100 orang</SelectItem>
-                    <SelectItem value="100+">Lebih dari 100 orang</SelectItem>
-                  </SelectContent>
-                </Select>
-                {actionData?.errors?.employeeCount && (
-                  <p className="text-sm text-red-600">
-                    {actionData.errors.employeeCount}
-                  </p>
-                )}
-              </div>
-
-              {/* Service Area */}
-              <div className="space-y-2">
-                <Label htmlFor="serviceArea">Area Layanan *</Label>
+                <Label htmlFor="companytype">Jenis Perusahaan *</Label>
                 <Input
-                  id="serviceArea"
-                  name="serviceArea"
+                  id="companytype"
+                  name="companytype"
                   type="text"
-                  placeholder="Jakarta Utara, Bekasi, Tangerang, dll"
+                  placeholder="Waste recycle"
                   className={
-                    actionData?.errors?.serviceArea ? "border-red-500" : ""
+                    actionData?.errors?.companytype ? "border-red-500" : ""
                   }
                   required
                 />
-                {actionData?.errors?.serviceArea && (
+                {actionData?.errors?.companytype && (
                   <p className="text-sm text-red-600">
-                    {actionData.errors.serviceArea}
+                    {actionData.errors.companytype}
                   </p>
                 )}
               </div>
 
-              {/* Description */}
+              {/* Company Description */}
               <div className="space-y-2">
-                <Label htmlFor="description">Deskripsi Usaha (Opsional)</Label>
+                <Label htmlFor="companydescription">
+                  Deskripsi Perusahaan *
+                </Label>
                 <Textarea
-                  id="description"
-                  name="description"
-                  placeholder="Ceritakan lebih detail tentang usaha pengelolaan sampah Anda..."
-                  rows={3}
+                  id="companydescription"
+                  name="companydescription"
+                  placeholder="Ceritakan tentang perusahaan Anda..."
+                  className={
+                    actionData?.errors?.companydescription
+                      ? "border-red-500"
+                      : ""
+                  }
+                  rows={4}
+                  required
                 />
+                {actionData?.errors?.companydescription && (
+                  <p className="text-sm text-red-600">
+                    {actionData.errors.companydescription}
+                  </p>
+                )}
+              </div>
+
+              {/* Company Logo */}
+              <div className="space-y-2">
+                <Label htmlFor="company_logo">Logo Perusahaan (Opsional)</Label>
+                <div className="space-y-3">
+                  <Input
+                    id="company_logo"
+                    name="company_logo"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleLogoChange}
+                    className="cursor-pointer"
+                  />
+                  {logoPreview && (
+                    <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+                      <img
+                        src={logoPreview}
+                        alt="Logo preview"
+                        className="w-16 h-16 object-cover rounded-lg border"
+                      />
+                      <div>
+                        <p className="text-sm font-medium">Preview Logo</p>
+                        <p className="text-xs text-gray-500">
+                          Ukuran maksimal 2MB, format JPG/PNG
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -532,13 +613,11 @@ export default function CompletingCompanyProfile() {
           {/* Back Link */}
           <div className="text-center">
             <Link
-              to={`/authpengelola/verifyotptoregister?phone=${encodeURIComponent(
-                phone
-              )}`}
+              to="/authpengelola"
               className="inline-flex items-center text-sm text-gray-600 hover:text-green-600 transition-colors"
             >
               <ArrowLeft className="mr-1 h-4 w-4" />
-              Kembali ke verifikasi OTP
+              Kembali ke halaman utama
             </Link>
           </div>
         </CardContent>

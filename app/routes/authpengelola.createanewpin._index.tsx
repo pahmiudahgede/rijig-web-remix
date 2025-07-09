@@ -8,7 +8,8 @@ import {
   Form,
   useActionData,
   useLoaderData,
-  useNavigation
+  useNavigation,
+  Link
 } from "@remix-run/react";
 import { useState, useRef } from "react";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
@@ -18,14 +19,19 @@ import { Label } from "~/components/ui/label";
 import { Alert, AlertDescription } from "~/components/ui/alert";
 import {
   Shield,
-  CheckCircle,
+  ArrowLeft,
+  ArrowRight,
   AlertCircle,
   Loader2,
-  Lock,
+  CheckCircle,
   Eye,
   EyeOff,
-  Sparkles
+  Lock,
+  Star
 } from "lucide-react";
+import { validatePin } from "~/utils/auth-utils";
+import pengelolaAuthService from "~/services/auth/pengelola.service";
+import { getUserSession, createUserSession } from "~/sessions.server";
 
 // Progress Indicator Component
 const ProgressIndicator = ({ currentStep = 5, totalSteps = 5 }) => {
@@ -50,7 +56,11 @@ const ProgressIndicator = ({ currentStep = 5, totalSteps = 5 }) => {
                 }
               `}
             >
-              {isCompleted ? <CheckCircle className="h-5 w-5" /> : stepNumber}
+              {isCompleted || isActive ? (
+                <CheckCircle className="h-5 w-5" />
+              ) : (
+                stepNumber
+              )}
             </div>
             {stepNumber < totalSteps && (
               <div
@@ -68,13 +78,12 @@ const ProgressIndicator = ({ currentStep = 5, totalSteps = 5 }) => {
 
 // Interfaces
 interface LoaderData {
-  phone: string;
-  approvedAt: string;
+  userSession: any;
 }
 
-interface CreatePINActionData {
+interface CreatePinActionData {
   errors?: {
-    pin?: string;
+    userpin?: string;
     confirmPin?: string;
     general?: string;
   };
@@ -84,61 +93,106 @@ interface CreatePINActionData {
 export const loader = async ({
   request
 }: LoaderFunctionArgs): Promise<Response> => {
-  const url = new URL(request.url);
-  const phone = url.searchParams.get("phone");
+  const userSession = await getUserSession(request);
 
-  if (!phone) {
-    return redirect("/authpengelola/requestotpforregister");
+  // Check if user is authenticated and has pengelola role
+  if (!userSession || userSession.role !== "pengelola") {
+    return redirect("/authpengelola");
   }
 
-  return json<LoaderData>({
-    phone,
-    approvedAt: new Date().toISOString()
-  });
+  // Check if user should be on this step
+  if (userSession.registrationStatus !== "approved") {
+    // Redirect based on current status
+    switch (userSession.registrationStatus) {
+      case "uncomplete":
+        return redirect("/authpengelola/completingcompanyprofile");
+      case "awaiting_approval":
+        return redirect("/authpengelola/waitingapprovalfromadministrator");
+      case "complete":
+        return redirect("/pengelola/dashboard");
+      default:
+        break;
+    }
+  }
+
+  return json<LoaderData>({ userSession });
 };
 
 export const action = async ({
   request
 }: ActionFunctionArgs): Promise<Response> => {
+  const userSession = await getUserSession(request);
+
+  if (!userSession || userSession.role !== "pengelola") {
+    return redirect("/authpengelola");
+  }
+
   const formData = await request.formData();
-  const phone = formData.get("phone") as string;
-  const pin = formData.get("pin") as string;
+  const userpin = formData.get("userpin") as string;
   const confirmPin = formData.get("confirmPin") as string;
 
   // Validation
-  const errors: { pin?: string; confirmPin?: string; general?: string } = {};
+  const errors: { [key: string]: string } = {};
 
-  if (!pin || pin.length !== 6) {
-    errors.pin = "PIN harus 6 digit";
-  } else if (!/^\d{6}$/.test(pin)) {
-    errors.pin = "PIN hanya boleh berisi angka";
-  } else if (/^(.)\1{5}$/.test(pin)) {
-    errors.pin = "PIN tidak boleh angka yang sama semua (111111)";
-  } else if (pin === "123456" || pin === "654321" || pin === "000000") {
-    errors.pin = "PIN terlalu mudah ditebak, gunakan kombinasi yang lebih aman";
+  if (!userpin) {
+    errors.userpin = "PIN wajib diisi";
+  } else if (!validatePin(userpin)) {
+    errors.userpin = "PIN harus 6 digit angka";
   }
 
   if (!confirmPin) {
     errors.confirmPin = "Konfirmasi PIN wajib diisi";
-  } else if (pin !== confirmPin) {
+  } else if (userpin !== confirmPin) {
     errors.confirmPin = "PIN dan konfirmasi PIN tidak sama";
   }
 
   if (Object.keys(errors).length > 0) {
-    return json<CreatePINActionData>({ errors }, { status: 400 });
+    return json<CreatePinActionData>({ errors }, { status: 400 });
   }
 
-  // Simulasi menyimpan PIN - dalam implementasi nyata, hash dan simpan ke database
   try {
-    console.log("Creating PIN for phone:", phone);
+    // Call API untuk create PIN
+    const response = await pengelolaAuthService.createPin({
+      userpin
+    });
 
-    // Simulasi delay API call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    if (response.meta.status === 200 && response.data) {
+      // PIN berhasil dibuat, update session dan redirect ke dashboard
+      return createUserSession({
+        request,
+        sessionData: {
+          ...userSession,
+          accessToken: response.data.access_token,
+          refreshToken: response.data.refresh_token,
+          sessionId: response.data.session_id,
+          tokenType: response.data.token_type,
+          registrationStatus: response.data.registration_status,
+          nextStep: response.data.next_step
+        },
+        redirectTo: "/pengelola/dashboard"
+      });
+    } else {
+      return json<CreatePinActionData>(
+        {
+          errors: { general: response.meta.message || "Gagal membuat PIN" }
+        },
+        { status: 400 }
+      );
+    }
+  } catch (error: any) {
+    console.error("Create PIN error:", error);
 
-    // Redirect ke dashboard pengelola setelah berhasil
-    return redirect("/pengelola/dashboard");
-  } catch (error) {
-    return json<CreatePINActionData>(
+    // Handle specific API errors
+    if (error.response?.data?.meta?.message) {
+      return json<CreatePinActionData>(
+        {
+          errors: { general: error.response.data.meta.message }
+        },
+        { status: error.response.status || 500 }
+      );
+    }
+
+    return json<CreatePinActionData>(
       {
         errors: { general: "Gagal membuat PIN. Silakan coba lagi." }
       },
@@ -147,15 +201,15 @@ export const action = async ({
   }
 };
 
-export default function CreateANewPIN() {
-  const { phone, approvedAt } = useLoaderData<LoaderData>();
-  const actionData = useActionData<CreatePINActionData>();
+export default function CreateANewPin() {
+  const { userSession } = useLoaderData<LoaderData>();
+  const actionData = useActionData<CreatePinActionData>();
   const navigation = useNavigation();
 
   const [pin, setPin] = useState(["", "", "", "", "", ""]);
   const [confirmPin, setConfirmPin] = useState(["", "", "", "", "", ""]);
   const [showPin, setShowPin] = useState(false);
-  const [pinStrength, setPinStrength] = useState(0);
+  const [showConfirmPin, setShowConfirmPin] = useState(false);
 
   const pinRefs = useRef<(HTMLInputElement | null)[]>([]);
   const confirmPinRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -166,23 +220,20 @@ export default function CreateANewPIN() {
   const handlePinChange = (
     index: number,
     value: string,
-    isConfirm: boolean = false
+    isPinField: boolean = true
   ) => {
     if (!/^\d*$/.test(value)) return; // Only allow digits
 
-    const newPin = isConfirm ? [...confirmPin] : [...pin];
-    newPin[index] = value;
+    const currentPin = isPinField ? pin : confirmPin;
+    const setCurrentPin = isPinField ? setPin : setConfirmPin;
+    const refs = isPinField ? pinRefs : confirmPinRefs;
 
-    if (isConfirm) {
-      setConfirmPin(newPin);
-    } else {
-      setPin(newPin);
-      calculatePinStrength(newPin.join(""));
-    }
+    const newPin = [...currentPin];
+    newPin[index] = value;
+    setCurrentPin(newPin);
 
     // Auto-focus next input
     if (value && index < 5) {
-      const refs = isConfirm ? confirmPinRefs : pinRefs;
       refs.current[index + 1]?.focus();
     }
   };
@@ -191,114 +242,43 @@ export default function CreateANewPIN() {
   const handleKeyDown = (
     index: number,
     e: React.KeyboardEvent,
-    isConfirm: boolean = false
+    isPinField: boolean = true
   ) => {
-    if (e.key === "Backspace") {
-      const currentPin = isConfirm ? confirmPin : pin;
-      const refs = isConfirm ? confirmPinRefs : pinRefs;
+    const currentPin = isPinField ? pin : confirmPin;
+    const refs = isPinField ? pinRefs : confirmPinRefs;
 
-      if (!currentPin[index] && index > 0) {
-        refs.current[index - 1]?.focus();
+    if (e.key === "Backspace" && !currentPin[index] && index > 0) {
+      refs.current[index - 1]?.focus();
+    }
+  };
+
+  // Handle paste
+  const handlePaste = (e: React.ClipboardEvent, isPinField: boolean = true) => {
+    e.preventDefault();
+    const pastedText = e.clipboardData.getData("text");
+    const digits = pastedText.replace(/\D/g, "").slice(0, 6);
+
+    if (digits.length === 6) {
+      const newPin = digits.split("");
+      if (isPinField) {
+        setPin(newPin);
+        pinRefs.current[5]?.focus();
+      } else {
+        setConfirmPin(newPin);
+        confirmPinRefs.current[5]?.focus();
       }
     }
   };
 
-  // Calculate PIN strength
-  const calculatePinStrength = (pinValue: string) => {
-    if (pinValue.length < 6) {
-      setPinStrength(0);
-      return;
-    }
-
-    let strength = 0;
-
-    // Check for sequential numbers
-    const isSequential =
-      /012345|123456|234567|345678|456789|987654|876543|765432|654321|543210/.test(
-        pinValue
-      );
-    if (!isSequential) strength += 25;
-
-    // Check for repeated numbers
-    const hasRepeated = /(.)\1{2,}/.test(pinValue);
-    if (!hasRepeated) strength += 25;
-
-    // Check for common patterns
-    const isCommon = [
-      "123456",
-      "654321",
-      "111111",
-      "000000",
-      "222222",
-      "333333",
-      "444444",
-      "555555",
-      "666666",
-      "777777",
-      "888888",
-      "999999"
-    ].includes(pinValue);
-    if (!isCommon) strength += 25;
-
-    // Check for variety
-    const uniqueDigits = new Set(pinValue.split("")).size;
-    if (uniqueDigits >= 4) strength += 25;
-
-    setPinStrength(strength);
-  };
-
-  // Get strength color and text
-  const getStrengthInfo = () => {
-    if (pinStrength === 0)
-      return {
-        color: "bg-gray-200",
-        text: "Masukkan PIN",
-        textColor: "text-gray-500"
-      };
-    if (pinStrength <= 25)
-      return { color: "bg-red-500", text: "Lemah", textColor: "text-red-600" };
-    if (pinStrength <= 50)
-      return {
-        color: "bg-yellow-500",
-        text: "Sedang",
-        textColor: "text-yellow-600"
-      };
-    if (pinStrength <= 75)
-      return {
-        color: "bg-blue-500",
-        text: "Bagus",
-        textColor: "text-blue-600"
-      };
-    return {
-      color: "bg-green-500",
-      text: "Sangat Kuat",
-      textColor: "text-green-600"
-    };
-  };
-
-  const strengthInfo = getStrengthInfo();
-  const fullPin = pin.join("");
-  const fullConfirmPin = confirmPin.join("");
+  const pinValue = pin.join("");
+  const confirmPinValue = confirmPin.join("");
+  const isPinComplete = pinValue.length === 6 && confirmPinValue.length === 6;
+  const isPinMatching = pinValue === confirmPinValue && pinValue.length === 6;
 
   return (
     <div className="space-y-6">
       {/* Progress Indicator */}
       <ProgressIndicator currentStep={5} totalSteps={5} />
-
-      {/* Success Alert */}
-      <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-        <div className="flex items-center space-x-3">
-          <CheckCircle className="h-6 w-6 text-green-600" />
-          <div>
-            <p className="font-medium text-green-800">
-              Selamat! Akun Anda Telah Disetujui
-            </p>
-            <p className="text-sm text-green-700">
-              Administrator telah memverifikasi dan menyetujui aplikasi Anda
-            </p>
-          </div>
-        </div>
-      </div>
 
       {/* Main Card */}
       <Card className="border-0 shadow-2xl bg-white/80 backdrop-blur-sm">
@@ -310,7 +290,7 @@ export default function CreateANewPIN() {
             Buat PIN Keamanan
           </h1>
           <p className="text-muted-foreground mt-2">
-            Langkah terakhir untuk mengamankan akun Anda
+            Langkah terakhir! Buat PIN 6 digit untuk mengamankan akun Anda
           </p>
         </CardHeader>
 
@@ -325,137 +305,143 @@ export default function CreateANewPIN() {
 
           {/* Form */}
           <Form method="post" className="space-y-6">
-            <input type="hidden" name="phone" value={phone} />
-            <input type="hidden" name="pin" value={fullPin} />
-            <input type="hidden" name="confirmPin" value={fullConfirmPin} />
+            <input type="hidden" name="userpin" value={pinValue} />
+            <input type="hidden" name="confirmPin" value={confirmPinValue} />
 
             {/* PIN Input */}
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <Label className="text-base font-medium">PIN 6 Digit</Label>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowPin(!showPin)}
-                  className="text-gray-500 hover:text-gray-700"
-                >
-                  {showPin ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
-
-              <div className="flex justify-center space-x-3">
-                {pin.map((digit, index) => (
-                  <Input
-                    key={index}
-                    ref={(el) => (pinRefs.current[index] = el)}
-                    type={showPin ? "text" : "password"}
-                    maxLength={1}
-                    value={digit}
-                    onChange={(e) => handlePinChange(index, e.target.value)}
-                    onKeyDown={(e) => handleKeyDown(index, e)}
-                    className={`w-12 h-12 text-center text-lg font-bold ${
-                      actionData?.errors?.pin ? "border-red-500" : ""
-                    }`}
-                    autoFocus={index === 0}
-                  />
-                ))}
-              </div>
-
-              {actionData?.errors?.pin && (
-                <p className="text-sm text-red-600 text-center">
-                  {actionData.errors.pin}
-                </p>
-              )}
-
-              {/* PIN Strength Indicator */}
-              {fullPin.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600">Kekuatan PIN</span>
-                    <span
-                      className={`text-sm font-medium ${strengthInfo.textColor}`}
-                    >
-                      {strengthInfo.text}
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className={`h-2 rounded-full transition-all duration-300 ${strengthInfo.color}`}
-                      style={{ width: `${pinStrength}%` }}
-                    ></div>
-                  </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-base font-medium">
+                    Masukkan PIN Baru
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowPin(!showPin)}
+                    className="h-8 px-2 text-gray-500 hover:text-gray-700"
+                  >
+                    {showPin ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
                 </div>
-              )}
+
+                <div className="flex justify-center space-x-3">
+                  {pin.map((digit, index) => (
+                    <Input
+                      key={index}
+                      ref={(el) => (pinRefs.current[index] = el)}
+                      type={showPin ? "text" : "password"}
+                      maxLength={1}
+                      value={digit}
+                      onChange={(e) =>
+                        handlePinChange(index, e.target.value, true)
+                      }
+                      onKeyDown={(e) => handleKeyDown(index, e, true)}
+                      onPaste={(e) => handlePaste(e, true)}
+                      className={`w-14 h-14 text-center text-xl font-bold ${
+                        actionData?.errors?.userpin ? "border-red-500" : ""
+                      }`}
+                      autoFocus={index === 0}
+                    />
+                  ))}
+                </div>
+
+                {actionData?.errors?.userpin && (
+                  <p className="text-sm text-red-600 text-center">
+                    {actionData.errors.userpin}
+                  </p>
+                )}
+              </div>
+
+              {/* Confirm PIN Input */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-base font-medium">
+                    Konfirmasi PIN
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowConfirmPin(!showConfirmPin)}
+                    className="h-8 px-2 text-gray-500 hover:text-gray-700"
+                  >
+                    {showConfirmPin ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+
+                <div className="flex justify-center space-x-3">
+                  {confirmPin.map((digit, index) => (
+                    <Input
+                      key={index}
+                      ref={(el) => (confirmPinRefs.current[index] = el)}
+                      type={showConfirmPin ? "text" : "password"}
+                      maxLength={1}
+                      value={digit}
+                      onChange={(e) =>
+                        handlePinChange(index, e.target.value, false)
+                      }
+                      onKeyDown={(e) => handleKeyDown(index, e, false)}
+                      onPaste={(e) => handlePaste(e, false)}
+                      className={`w-14 h-14 text-center text-xl font-bold ${
+                        actionData?.errors?.confirmPin ? "border-red-500" : ""
+                      } ${
+                        isPinComplete && !isPinMatching ? "border-red-500" : ""
+                      } ${isPinMatching ? "border-green-500" : ""}`}
+                    />
+                  ))}
+                </div>
+
+                {actionData?.errors?.confirmPin && (
+                  <p className="text-sm text-red-600 text-center">
+                    {actionData.errors.confirmPin}
+                  </p>
+                )}
+
+                {isPinComplete &&
+                  !isPinMatching &&
+                  !actionData?.errors?.confirmPin && (
+                    <p className="text-sm text-red-600 text-center">
+                      PIN tidak sama, silakan periksa kembali
+                    </p>
+                  )}
+
+                {isPinMatching && (
+                  <div className="flex items-center justify-center space-x-2 text-sm text-green-600">
+                    <CheckCircle className="h-4 w-4" />
+                    <span>PIN cocok!</span>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Confirm PIN Input */}
-            <div className="space-y-4">
-              <Label className="text-base font-medium">Konfirmasi PIN</Label>
-
-              <div className="flex justify-center space-x-3">
-                {confirmPin.map((digit, index) => (
-                  <Input
-                    key={index}
-                    ref={(el) => (confirmPinRefs.current[index] = el)}
-                    type={showPin ? "text" : "password"}
-                    maxLength={1}
-                    value={digit}
-                    onChange={(e) =>
-                      handlePinChange(index, e.target.value, true)
-                    }
-                    onKeyDown={(e) => handleKeyDown(index, e, true)}
-                    className={`w-12 h-12 text-center text-lg font-bold ${
-                      actionData?.errors?.confirmPin ? "border-red-500" : ""
-                    }`}
-                  />
-                ))}
-              </div>
-
-              {actionData?.errors?.confirmPin && (
-                <p className="text-sm text-red-600 text-center">
-                  {actionData.errors.confirmPin}
-                </p>
-              )}
-
-              {/* PIN Match Indicator */}
-              {fullPin.length === 6 && fullConfirmPin.length === 6 && (
-                <div className="text-center">
-                  {fullPin === fullConfirmPin ? (
-                    <div className="flex items-center justify-center space-x-2 text-green-600">
-                      <CheckCircle className="h-4 w-4" />
-                      <span className="text-sm font-medium">PIN cocok</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-center space-x-2 text-red-600">
-                      <AlertCircle className="h-4 w-4" />
-                      <span className="text-sm font-medium">
-                        PIN tidak cocok
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* PIN Guidelines */}
+            {/* PIN Requirements */}
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-start space-x-3">
                 <Lock className="h-5 w-5 text-blue-600 mt-0.5" />
                 <div>
-                  <p className="text-sm font-medium text-blue-800 mb-2">
-                    Tips PIN yang Aman:
+                  <p className="text-sm font-medium text-blue-800">
+                    Syarat PIN Keamanan
                   </p>
-                  <ul className="text-xs text-blue-700 space-y-1">
-                    <li>• Hindari angka berurutan (123456, 654321)</li>
-                    <li>• Jangan gunakan angka yang sama semua (111111)</li>
-                    <li>• Hindari kombinasi mudah ditebak (000000, 123456)</li>
-                    <li>• Gunakan kombinasi angka yang hanya Anda ketahui</li>
-                  </ul>
+                  <div className="text-xs text-blue-700 mt-1 space-y-1">
+                    <p>• Harus terdiri dari 6 digit angka</p>
+                    <p>
+                      • Hindari urutan angka (123456) atau angka sama (111111)
+                    </p>
+                    <p>• Jangan gunakan tanggal lahir atau nomor telepon</p>
+                    <p>
+                      • PIN akan digunakan untuk verifikasi transaksi penting
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -464,38 +450,47 @@ export default function CreateANewPIN() {
             <Button
               type="submit"
               className="w-full h-12 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white shadow-lg"
-              disabled={
-                isSubmitting ||
-                fullPin.length !== 6 ||
-                fullConfirmPin.length !== 6 ||
-                fullPin !== fullConfirmPin ||
-                pinStrength < 50
-              }
+              disabled={!isPinMatching || isSubmitting}
             >
               {isSubmitting ? (
                 <>
                   <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Membuat Akun...
+                  Membuat PIN...
                 </>
               ) : (
                 <>
-                  <Sparkles className="mr-2 h-5 w-5" />
+                  <Star className="mr-2 h-5 w-5" />
                   Selesaikan Registrasi
+                  <ArrowRight className="ml-2 h-5 w-5" />
                 </>
               )}
             </Button>
           </Form>
 
-          {/* Final Note */}
-          <div className="p-4 bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg">
-            <div className="text-center">
-              <p className="text-sm font-medium text-gray-800 mb-1">
-                🎉 Hampir selesai!
-              </p>
-              <p className="text-xs text-gray-600">
-                Setelah membuat PIN, Anda akan langsung dapat mengakses
-                dashboard pengelola
-              </p>
+          {/* Back Link */}
+          <div className="text-center">
+            <Link
+              to="/authpengelola/waitingapprovalfromadministrator"
+              className="inline-flex items-center text-sm text-gray-600 hover:text-green-600 transition-colors"
+            >
+              <ArrowLeft className="mr-1 h-4 w-4" />
+              Kembali ke status persetujuan
+            </Link>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Security Tips */}
+      <Card className="border border-gray-200 bg-white/60 backdrop-blur-sm">
+        <CardContent className="p-4">
+          <div className="text-center space-y-2">
+            <p className="text-sm font-medium text-gray-700">
+              🔒 Tips Keamanan PIN
+            </p>
+            <div className="text-xs text-gray-600 space-y-1">
+              <p>• Jangan berikan PIN kepada siapa pun</p>
+              <p>• Ganti PIN secara berkala untuk keamanan optimal</p>
+              <p>• PIN dapat diubah melalui menu pengaturan setelah login</p>
             </div>
           </div>
         </CardContent>

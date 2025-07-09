@@ -1,21 +1,35 @@
-import { json, redirect, type LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData, Link } from "@remix-run/react";
-import { useState, useEffect } from "react";
+import {
+  json,
+  redirect,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs
+} from "@remix-run/node";
+import {
+  Form,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+  Link
+} from "@remix-run/react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
+import { Alert, AlertDescription } from "~/components/ui/alert";
 import { Progress } from "~/components/ui/progress";
 import {
   Clock,
   CheckCircle,
-  Phone,
-  Mail,
-  MessageSquare,
   RefreshCw,
-  FileText,
-  Shield,
+  Loader2,
   AlertCircle,
-  Users
+  UserCheck,
+  ArrowLeft,
+  ArrowRight,
+  MessageCircle,
+  FileCheck
 } from "lucide-react";
+import pengelolaAuthService from "~/services/auth/pengelola.service";
+import { getUserSession, createUserSession } from "~/sessions.server";
 
 // Progress Indicator Component
 const ProgressIndicator = ({ currentStep = 4, totalSteps = 5 }) => {
@@ -56,84 +70,180 @@ const ProgressIndicator = ({ currentStep = 4, totalSteps = 5 }) => {
   );
 };
 
-// Interface
+// Interfaces
 interface LoaderData {
-  phone: string;
-  submittedAt: string;
-  estimatedApprovalTime: string; // "1-3 hari kerja"
-  applicationId: string;
+  userSession: any;
+  lastChecked: string;
+}
+
+interface CheckApprovalActionData {
+  success?: boolean;
+  approved?: boolean;
+  message?: string;
+  errors?: {
+    general?: string;
+  };
 }
 
 export const loader = async ({
   request
 }: LoaderFunctionArgs): Promise<Response> => {
-  const url = new URL(request.url);
-  const phone = url.searchParams.get("phone");
+  const userSession = await getUserSession(request);
 
-  if (!phone) {
-    return redirect("/authpengelola/requestotpforregister");
+  // Check if user is authenticated and has pengelola role
+  if (!userSession || userSession.role !== "pengelola") {
+    return redirect("/authpengelola");
   }
 
-  // Simulasi data - dalam implementasi nyata, ambil dari database
+  // Check if user should be on this step
+  if (userSession.registrationStatus !== "awaiting_approval") {
+    // Redirect based on current status
+    switch (userSession.registrationStatus) {
+      case "uncomplete":
+        return redirect("/authpengelola/completingcompanyprofile");
+      case "approved":
+        return redirect("/authpengelola/createanewpin");
+      case "complete":
+        return redirect("/pengelola/dashboard");
+      default:
+        break;
+    }
+  }
+
   return json<LoaderData>({
-    phone,
-    submittedAt: new Date().toISOString(),
-    estimatedApprovalTime: "1-3 hari kerja",
-    applicationId: "WF" + Date.now().toString().slice(-6)
+    userSession,
+    lastChecked: new Date().toISOString()
   });
 };
 
-export default function WaitingApprovalFromAdministrator() {
-  const { phone, submittedAt, estimatedApprovalTime, applicationId } =
-    useLoaderData<LoaderData>();
-  const [timeElapsed, setTimeElapsed] = useState(0);
+export const action = async ({
+  request
+}: ActionFunctionArgs): Promise<Response> => {
+  const userSession = await getUserSession(request);
 
-  // Timer untuk menunjukkan berapa lama sudah menunggu
+  if (!userSession || userSession.role !== "pengelola") {
+    return redirect("/authpengelola");
+  }
+
+  try {
+    // Call API untuk check approval status
+    const response = await pengelolaAuthService.checkApproval();
+
+    if (response.meta.status === 200 && response.data) {
+      if (response.data.registration_status === "approved") {
+        // User sudah di-approve, update session dan redirect
+        return createUserSession({
+          request,
+          sessionData: {
+            ...userSession,
+            ...(response.data.access_token && {
+              accessToken: response.data.access_token
+            }),
+            ...(response.data.refresh_token && {
+              refreshToken: response.data.refresh_token
+            }),
+            ...(response.data.session_id && {
+              sessionId: response.data.session_id
+            }),
+            tokenType: response.data.token_type,
+            registrationStatus: response.data.registration_status,
+            nextStep: response.data.next_step
+          },
+          redirectTo: "/authpengelola/createanewpin"
+        });
+      } else {
+        // Masih awaiting approval
+        return json<CheckApprovalActionData>({
+          success: true,
+          approved: false,
+          message:
+            response.data.message || "Masih menunggu persetujuan administrator"
+        });
+      }
+    } else {
+      return json<CheckApprovalActionData>(
+        {
+          errors: {
+            general:
+              response.meta.message || "Gagal mengecek status persetujuan"
+          }
+        },
+        { status: 400 }
+      );
+    }
+  } catch (error: any) {
+    console.error("Check approval error:", error);
+
+    // Handle specific API errors
+    if (error.response?.data?.meta?.message) {
+      return json<CheckApprovalActionData>(
+        {
+          errors: { general: error.response.data.meta.message }
+        },
+        { status: error.response.status || 500 }
+      );
+    }
+
+    return json<CheckApprovalActionData>(
+      {
+        errors: {
+          general: "Gagal mengecek status persetujuan. Silakan coba lagi."
+        }
+      },
+      { status: 500 }
+    );
+  }
+};
+
+export default function WaitingApprovalFromAdministrator() {
+  const { userSession, lastChecked } = useLoaderData<LoaderData>();
+  const actionData = useActionData<CheckApprovalActionData>();
+  const navigation = useNavigation();
+
+  const [timeWaiting, setTimeWaiting] = useState<string>("");
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
+
+  const isSubmitting = navigation.state === "submitting";
+
+  // Calculate time waiting
   useEffect(() => {
-    const interval = setInterval(() => {
-      const now = new Date().getTime();
-      const submitted = new Date(submittedAt).getTime();
-      const elapsed = Math.floor((now - submitted) / 1000 / 60); // minutes
-      setTimeElapsed(elapsed);
-    }, 60000); // Update setiap menit
+    const updateTimeWaiting = () => {
+      const now = new Date();
+      const submitted = new Date(lastChecked);
+      const diffMs = now.getTime() - submitted.getTime();
+
+      const hours = Math.floor(diffMs / (1000 * 60 * 60));
+      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+      if (hours > 0) {
+        setTimeWaiting(`${hours} jam ${minutes} menit`);
+      } else {
+        setTimeWaiting(`${minutes} menit`);
+      }
+    };
+
+    updateTimeWaiting();
+    const interval = setInterval(updateTimeWaiting, 60000); // Update every minute
 
     return () => clearInterval(interval);
-  }, [submittedAt]);
+  }, [lastChecked]);
 
-  // Format phone display
-  const formatPhone = (phoneNumber: string) => {
-    if (phoneNumber.length <= 2) return phoneNumber;
-    if (phoneNumber.length <= 5)
-      return `${phoneNumber.substring(0, 2)} ${phoneNumber.substring(2)}`;
-    if (phoneNumber.length <= 9)
-      return `${phoneNumber.substring(0, 2)} ${phoneNumber.substring(
-        2,
-        5
-      )} ${phoneNumber.substring(5)}`;
-    return `${phoneNumber.substring(0, 2)} ${phoneNumber.substring(
-      2,
-      5
-    )} ${phoneNumber.substring(5, 9)} ${phoneNumber.substring(9)}`;
-  };
+  // Auto refresh every 30 seconds
+  useEffect(() => {
+    if (!autoRefresh) return;
 
-  // Format elapsed time
-  const formatElapsedTime = (minutes: number) => {
-    if (minutes < 60) return `${minutes} menit yang lalu`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours} jam yang lalu`;
-    const days = Math.floor(hours / 24);
-    return `${days} hari yang lalu`;
-  };
+    const interval = setInterval(() => {
+      // Trigger form submission to check approval
+      const form = document.getElementById(
+        "check-approval-form"
+      ) as HTMLFormElement;
+      if (form && !isSubmitting) {
+        form.requestSubmit();
+      }
+    }, 30000); // 30 seconds
 
-  // Simulasi status checker - dalam implementasi nyata, polling ke server
-  const checkStatus = () => {
-    // Untuk demo, redirect ke step berikutnya setelah beberapa detik
-    setTimeout(() => {
-      window.location.href = `/authpengelola/createanewpin?phone=${encodeURIComponent(
-        phone
-      )}`;
-    }, 2000);
-  };
+    return () => clearInterval(interval);
+  }, [autoRefresh, isSubmitting]);
 
   return (
     <div className="space-y-6">
@@ -143,219 +253,202 @@ export default function WaitingApprovalFromAdministrator() {
       {/* Main Card */}
       <Card className="border-0 shadow-2xl bg-white/80 backdrop-blur-sm">
         <CardHeader className="text-center pb-2">
-          <div className="mx-auto mb-4 p-3 bg-gradient-to-br from-yellow-100 to-orange-100 rounded-full w-fit">
-            <Clock className="h-8 w-8 text-yellow-600 animate-pulse" />
+          <div className="mx-auto mb-4 p-3 bg-gradient-to-br from-orange-100 to-yellow-100 rounded-full w-fit">
+            <Clock className="h-8 w-8 text-orange-600" />
           </div>
           <h1 className="text-2xl font-bold text-gray-900">
-            Menunggu Persetujuan Administrator
+            Menunggu Persetujuan
           </h1>
           <p className="text-muted-foreground mt-2">
-            Aplikasi Anda sedang dalam proses verifikasi
+            Profil perusahaan Anda sedang ditinjau oleh administrator
           </p>
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* Status Info */}
-          <div className="text-center space-y-2">
-            <div className="inline-flex items-center space-x-2 px-4 py-2 bg-yellow-50 border border-yellow-200 rounded-full">
-              <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
-              <span className="text-sm font-medium text-yellow-800">
-                Status: Dalam Review
-              </span>
-            </div>
-            <p className="text-sm text-gray-600">
-              ID Aplikasi:{" "}
-              <span className="font-mono font-medium">{applicationId}</span>
-            </p>
-          </div>
+          {/* Status Alert */}
+          {actionData?.success && !actionData.approved && (
+            <Alert className="border-blue-200 bg-blue-50">
+              <Clock className="h-4 w-4 text-blue-600" />
+              <AlertDescription className="text-blue-800">
+                {actionData.message}
+              </AlertDescription>
+            </Alert>
+          )}
 
-          {/* Progress Bar */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-700">
-                Progress Verifikasi
-              </span>
-              <span className="text-sm text-gray-500">75%</span>
-            </div>
-            <Progress value={75} className="h-2" />
-            <p className="text-xs text-gray-500">
-              Estimasi waktu: {estimatedApprovalTime}
-            </p>
-          </div>
+          {/* Error Alert */}
+          {actionData?.errors?.general && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{actionData.errors.general}</AlertDescription>
+            </Alert>
+          )}
 
-          {/* Submitted Info */}
-          <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-            <div className="flex items-center space-x-3 mb-3">
-              <CheckCircle className="h-5 w-5 text-green-600" />
-              <span className="font-medium text-green-800">
-                Aplikasi Berhasil Dikirim
-              </span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-              <div>
-                <p className="text-green-700">
-                  <strong>Nomor WhatsApp:</strong> {formatPhone(phone)}
-                </p>
-              </div>
-              <div>
-                <p className="text-green-700">
-                  <strong>Waktu Kirim:</strong> {formatElapsedTime(timeElapsed)}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Next Steps */}
+          {/* Waiting Status */}
           <div className="space-y-4">
-            <h3 className="font-medium text-gray-900 flex items-center">
-              <FileText className="h-5 w-5 mr-2" />
-              Proses Selanjutnya
-            </h3>
+            {/* Progress Animation */}
+            <div className="relative">
+              <div className="flex items-center justify-center space-x-8 py-8">
+                <div className="flex flex-col items-center space-y-2">
+                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                    <CheckCircle className="h-6 w-6 text-green-600" />
+                  </div>
+                  <span className="text-sm font-medium text-green-600">
+                    Data Dikirim
+                  </span>
+                </div>
 
-            <div className="space-y-3">
-              <div className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg">
-                <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-xs font-medium text-blue-600 mt-0.5">
-                  1
+                <div className="flex-1 h-0.5 bg-orange-200 relative overflow-hidden">
+                  <div className="absolute inset-0 bg-orange-400 animate-pulse"></div>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-900">
-                    Verifikasi Data Perusahaan
-                  </p>
-                  <p className="text-xs text-gray-600">
-                    Administrator akan memverifikasi informasi yang Anda berikan
-                  </p>
-                </div>
-              </div>
 
-              <div className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg">
-                <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-xs font-medium text-blue-600 mt-0.5">
-                  2
+                <div className="flex flex-col items-center space-y-2">
+                  <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center animate-pulse">
+                    <UserCheck className="h-6 w-6 text-orange-600" />
+                  </div>
+                  <span className="text-sm font-medium text-orange-600">
+                    Verifikasi Admin
+                  </span>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-900">
-                    Pengecekan Dokumen
-                  </p>
-                  <p className="text-xs text-gray-600">
-                    Validasi legalitas dan kredibilitas perusahaan
-                  </p>
-                </div>
-              </div>
 
-              <div className="flex items-start space-x-3 p-3 bg-gray-50 rounded-lg">
-                <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center text-xs font-medium text-green-600 mt-0.5">
-                  3
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-900">
-                    Persetujuan & Aktivasi
-                  </p>
-                  <p className="text-xs text-gray-600">
-                    Akun akan diaktivasi dan Anda bisa membuat PIN
-                  </p>
+                <div className="flex-1 h-0.5 bg-gray-200"></div>
+
+                <div className="flex flex-col items-center space-y-2">
+                  <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
+                    <CheckCircle className="h-6 w-6 text-gray-400" />
+                  </div>
+                  <span className="text-sm font-medium text-gray-400">
+                    Approved
+                  </span>
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* Contact Info */}
-          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="flex items-start space-x-3">
-              <Users className="h-5 w-5 text-blue-600 mt-0.5" />
-              <div>
-                <p className="text-sm font-medium text-blue-800 mb-2">
-                  Butuh Bantuan atau Informasi?
-                </p>
-                <div className="space-y-2">
-                  <div className="flex items-center space-x-2">
-                    <Phone className="h-4 w-4 text-blue-600" />
-                    <a
-                      href="tel:+6281234567890"
-                      className="text-sm text-blue-700 hover:text-blue-900 font-medium"
-                    >
-                      +62 812-3456-7890
-                    </a>
+            {/* Time Waiting */}
+            <div className="text-center p-4 bg-gray-50 rounded-lg">
+              <p className="text-sm text-gray-600">Telah menunggu:</p>
+              <p className="text-lg font-semibold text-gray-900">
+                {timeWaiting}
+              </p>
+            </div>
+
+            {/* Information Cards */}
+            <div className="grid gap-4">
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-start space-x-3">
+                  <FileCheck className="h-5 w-5 text-blue-600 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-blue-800">
+                      Proses Verifikasi
+                    </p>
+                    <p className="text-xs text-blue-700 mt-1">
+                      Administrator sedang memverifikasi dokumen dan informasi
+                      perusahaan yang Anda berikan. Proses ini biasanya memakan
+                      waktu 1-24 jam.
+                    </p>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <Mail className="h-4 w-4 text-blue-600" />
-                    <a
-                      href="mailto:admin@wasteflow.com"
-                      className="text-sm text-blue-700 hover:text-blue-900 font-medium"
-                    >
-                      admin@wasteflow.com
-                    </a>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <MessageSquare className="h-4 w-4 text-blue-600" />
-                    <a
-                      href={`https://wa.me/6281234567890?text=Halo%20saya%20ingin%20bertanya%20tentang%20aplikasi%20${applicationId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-blue-700 hover:text-blue-900 font-medium"
-                    >
-                      WhatsApp Admin
-                    </a>
+                </div>
+              </div>
+
+              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <div className="flex items-start space-x-3">
+                  <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-yellow-800">
+                      Yang Diverifikasi
+                    </p>
+                    <div className="text-xs text-yellow-700 mt-1 space-y-1">
+                      <p>• Kebenaran informasi perusahaan</p>
+                      <p>• Validitas dokumen NPWP/Tax ID</p>
+                      <p>• Kesesuaian bidang usaha</p>
+                      <p>• Kelengkapan data kontak</p>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="space-y-3">
+          {/* Check Status Form */}
+          <Form method="post" id="check-approval-form">
             <Button
-              onClick={checkStatus}
-              className="w-full h-12 bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white shadow-lg"
+              type="submit"
+              variant="outline"
+              className="w-full h-12 border-2 border-orange-200 hover:bg-orange-50 text-orange-700"
+              disabled={isSubmitting}
             >
-              <RefreshCw className="mr-2 h-5 w-5" />
-              Cek Status Persetujuan
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Mengecek Status...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="mr-2 h-5 w-5" />
+                  Cek Status Persetujuan
+                </>
+              )}
             </Button>
+          </Form>
 
-            <Link to="/authpengelola">
-              <Button variant="outline" className="w-full h-12">
-                Kembali ke Halaman Utama
-              </Button>
-            </Link>
+          {/* Auto Refresh Toggle */}
+          <div className="flex items-center justify-center space-x-3 text-sm text-gray-600">
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+                className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+              />
+              <span>Auto-refresh setiap 30 detik</span>
+            </label>
           </div>
 
-          {/* Important Note */}
-          <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-            <div className="flex items-start space-x-3">
-              <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5" />
-              <div>
-                <p className="text-sm font-medium text-amber-800">
-                  Penting untuk Diingat
-                </p>
-                <ul className="text-xs text-amber-700 mt-1 space-y-1">
-                  <li>
-                    • Jangan tutup aplikasi ini, bookmark halaman untuk akses
-                    mudah
-                  </li>
-                  <li>
-                    • Anda akan mendapat notifikasi WhatsApp saat disetujui
-                  </li>
-                  <li>
-                    • Proses verifikasi dilakukan pada hari kerja (Senin-Jumat)
-                  </li>
-                  <li>
-                    • Pastikan nomor WhatsApp aktif untuk menerima notifikasi
-                  </li>
-                </ul>
-              </div>
+          {/* Contact Support */}
+          <div className="text-center space-y-3">
+            <p className="text-sm text-gray-600">
+              Sudah lebih dari 24 jam? Hubungi administrator
+            </p>
+            <div className="flex flex-col space-y-2">
+              <a
+                href="https://wa.me/6281234567890?text=Halo%20saya%20butuh%20bantuan%20verifikasi%20akun%20pengelola"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center text-sm text-green-600 hover:text-green-800 font-medium"
+              >
+                <MessageCircle className="mr-1 h-4 w-4" />
+                WhatsApp: +62 812-3456-7890
+              </a>
+              <a
+                href="mailto:admin@wasteflow.com?subject=Bantuan%20Verifikasi%20Akun%20Pengelola"
+                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+              >
+                Email: admin@wasteflow.com
+              </a>
             </div>
+          </div>
+
+          {/* Back Link */}
+          <div className="text-center border-t pt-4">
+            <Link
+              to="/authpengelola/completingcompanyprofile"
+              className="inline-flex items-center text-sm text-gray-600 hover:text-green-600 transition-colors"
+            >
+              <ArrowLeft className="mr-1 h-4 w-4" />
+              Edit profil perusahaan
+            </Link>
           </div>
         </CardContent>
       </Card>
 
-      {/* Demo Card */}
-      <Card className="border border-green-200 bg-green-50/50 backdrop-blur-sm">
+      {/* Tips Card */}
+      <Card className="border border-gray-200 bg-white/60 backdrop-blur-sm">
         <CardContent className="p-4">
-          <div className="text-center">
-            <p className="text-sm font-medium text-green-800 mb-2">
-              Demo Mode:
+          <div className="text-center space-y-2">
+            <p className="text-sm font-medium text-gray-700">
+              💡 Tips: Pastikan informasi yang diberikan akurat
             </p>
-            <p className="text-xs text-green-700">
-              Klik "Cek Status Persetujuan" untuk simulasi approval dan lanjut
-              ke step terakhir
+            <p className="text-xs text-gray-600">
+              Jika ada kesalahan data, admin akan menghubungi Anda untuk revisi
             </p>
           </div>
         </CardContent>

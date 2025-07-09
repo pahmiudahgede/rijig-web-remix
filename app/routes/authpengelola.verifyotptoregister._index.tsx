@@ -27,8 +27,11 @@ import {
   CheckCircle,
   Smartphone
 } from "lucide-react";
+import { validateOtp, generateDeviceId } from "~/utils/auth-utils";
+import pengelolaAuthService from "~/services/auth/pengelola.service";
+import { createUserSession } from "~/sessions.server";
 
-// Progress Indicator Component (reuse dari step sebelumnya)
+// Progress Indicator Component
 const ProgressIndicator = ({ currentStep = 2, totalSteps = 5 }) => {
   return (
     <div className="flex items-center justify-center space-x-2 mb-8">
@@ -110,46 +113,115 @@ export const action = async ({
   const actionType = formData.get("_action") as string;
 
   if (actionType === "resend") {
-    // Simulasi resend OTP
-    console.log("Resending OTP to WhatsApp:", phone);
+    try {
+      // Call API untuk resend OTP
+      const response = await pengelolaAuthService.requestOtpRegister({
+        phone,
+        role_name: "pengelola"
+      });
 
-    return json<VerifyOTPActionData>({
-      success: true,
-      message: "Kode OTP baru telah dikirim ke WhatsApp Anda",
-      otpSentAt: new Date().toISOString()
-    });
+      if (response.meta.status === 200) {
+        return json<VerifyOTPActionData>({
+          success: true,
+          message: "Kode OTP baru telah dikirim ke WhatsApp Anda",
+          otpSentAt: new Date().toISOString()
+        });
+      } else {
+        return json<VerifyOTPActionData>(
+          {
+            errors: {
+              general: response.meta.message || "Gagal mengirim ulang OTP"
+            }
+          },
+          { status: 400 }
+        );
+      }
+    } catch (error: any) {
+      console.error("Resend OTP error:", error);
+      return json<VerifyOTPActionData>(
+        {
+          errors: { general: "Gagal mengirim ulang OTP. Silakan coba lagi." }
+        },
+        { status: 500 }
+      );
+    }
   }
 
   if (actionType === "verify") {
     // Validation
     const errors: { otp?: string; general?: string } = {};
 
-    if (!otp || otp.length !== 4) {
-      errors.otp = "Kode OTP harus 4 digit";
-    } else if (!/^\d{4}$/.test(otp)) {
-      errors.otp = "Kode OTP hanya boleh berisi angka";
+    if (!otp) {
+      errors.otp = "Kode OTP wajib diisi";
+    } else if (!validateOtp(otp)) {
+      errors.otp = "Kode OTP harus 4 digit angka";
     }
 
     if (Object.keys(errors).length > 0) {
       return json<VerifyOTPActionData>({ errors }, { status: 400 });
     }
 
-    // Simulasi verifikasi OTP - dalam implementasi nyata, cek ke database/cache
-    if (otp === "1234") {
-      // OTP valid, lanjut ke step berikutnya
-      return redirect(
-        `/authpengelola/completingcompanyprofile?phone=${encodeURIComponent(
-          phone
-        )}`
+    try {
+      // Generate device ID
+      const deviceId = generateDeviceId("pengelola_");
+
+      // Call API untuk verifikasi OTP
+      const response = await pengelolaAuthService.verifyOtpRegister({
+        phone,
+        otp,
+        device_id: deviceId,
+        role_name: "pengelola"
+      });
+
+      if (response.meta.status === 200 && response.data) {
+        // OTP valid, create session
+        return createUserSession({
+          request,
+          sessionData: {
+            accessToken: response.data.access_token,
+            refreshToken: response.data.refresh_token,
+            sessionId: response.data.session_id,
+            role: "pengelola",
+            deviceId: deviceId,
+            phone: phone,
+            tokenType: response.data.token_type,
+            registrationStatus: response.data.registration_status,
+            nextStep: response.data.next_step
+          },
+          redirectTo: "/authpengelola/completingcompanyprofile"
+        });
+      } else {
+        return json<VerifyOTPActionData>(
+          {
+            errors: {
+              otp:
+                response.meta.message ||
+                "Kode OTP tidak valid atau sudah kedaluwarsa"
+            }
+          },
+          { status: 401 }
+        );
+      }
+    } catch (error: any) {
+      console.error("Verify OTP error:", error);
+
+      // Handle specific API errors
+      if (error.response?.data?.meta?.message) {
+        return json<VerifyOTPActionData>(
+          {
+            errors: { otp: error.response.data.meta.message }
+          },
+          { status: error.response.status || 500 }
+        );
+      }
+
+      return json<VerifyOTPActionData>(
+        {
+          errors: { general: "Gagal memverifikasi OTP. Silakan coba lagi." }
+        },
+        { status: 500 }
       );
     }
-
-    return json<VerifyOTPActionData>(
-      {
-        errors: { otp: "Kode OTP tidak valid atau sudah kedaluwarsa" }
-      },
-      { status: 401 }
-    );
   }
 
   return json<VerifyOTPActionData>(
@@ -289,10 +361,12 @@ export default function VerifyOTPToRegister() {
           )}
 
           {/* Error Alert */}
-          {actionData?.errors?.otp && (
+          {(actionData?.errors?.otp || actionData?.errors?.general) && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{actionData.errors.otp}</AlertDescription>
+              <AlertDescription>
+                {actionData.errors.otp || actionData.errors.general}
+              </AlertDescription>
             </Alert>
           )}
 
@@ -407,18 +481,19 @@ export default function VerifyOTPToRegister() {
         </CardContent>
       </Card>
 
-      {/* Demo Info */}
-      <Card className="border border-blue-200 bg-blue-50/50 backdrop-blur-sm">
+      {/* Help Card */}
+      <Card className="border border-gray-200 bg-white/60 backdrop-blur-sm">
         <CardContent className="p-4">
           <div className="text-center">
-            <p className="text-sm font-medium text-blue-800 mb-2">Demo OTP:</p>
-            <div className="text-xs text-blue-700 space-y-1">
-              <p>
-                Gunakan kode:{" "}
-                <span className="font-mono font-bold text-lg">1234</span>
-              </p>
-              <p>Atau tunggu countdown habis untuk test resend</p>
-            </div>
+            <p className="text-sm text-gray-600 mb-2">Mengalami kesulitan?</p>
+            <a
+              href="https://wa.me/6281234567890?text=Halo%20saya%20butuh%20bantuan%20verifikasi%20OTP"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-green-600 hover:text-green-800 font-medium"
+            >
+              Hubungi Customer Support
+            </a>
           </div>
         </CardContent>
       </Card>
