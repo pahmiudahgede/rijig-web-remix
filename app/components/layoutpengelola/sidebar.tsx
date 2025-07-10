@@ -129,54 +129,15 @@ const operationalMenuItems: MenuItem[] = [
     title: "Transaksi & Pembayaran",
     icon: <CreditCard className="w-5 h-5" />,
     children: [
-      { title: "Transaksi Hari Ini", href: "/pengelola/transactions/today" },
       {
-        title: "Pembayaran Tertunda",
-        href: "/pengelola/transactions/pending",
-        badge: "urgent"
-      },
-      {
-        title: "Verifikasi Pembayaran",
-        href: "/pengelola/transactions/verification"
-      },
-      { title: "Riwayat Transaksi", href: "/pengelola/transactions/history" },
-      { title: "Rekap Harian", href: "/pengelola/transactions/daily-recap" }
+        title: "Transaksi Hari Ini",
+        href: "/pengelola/dashboard/transactions"
+      }
     ]
   }
 ];
 
 const fieldMenuItems: MenuItem[] = [
-  {
-    title: "Area Coverage",
-    icon: <MapPin className="w-5 h-5" />,
-    children: [
-      { title: "Peta Operasional", href: "/pengelola/coverage/map" },
-      { title: "Rute Pengumpulan", href: "/pengelola/coverage/routes" },
-      {
-        title: "Titik Pengumpulan",
-        href: "/pengelola/coverage/collection-points"
-      },
-      {
-        title: "Area Prioritas",
-        href: "/pengelola/coverage/priority-areas",
-        badge: "new"
-      }
-    ]
-  },
-  {
-    title: "Penjadwalan",
-    icon: <Calendar className="w-5 h-5" />,
-    children: [
-      { title: "Jadwal Mingguan", href: "/pengelola/schedule/weekly" },
-      { title: "Pengepul On-duty", href: "/pengelola/schedule/on-duty" },
-      { title: "Shift Management", href: "/pengelola/schedule/shifts" },
-      {
-        title: "Emergency Pickup",
-        href: "/pengelola/schedule/emergency",
-        badge: "urgent"
-      }
-    ]
-  },
   {
     title: "Komunikasi",
     icon: <MessageCircle className="w-5 h-5" />,
@@ -185,76 +146,20 @@ const fieldMenuItems: MenuItem[] = [
       {
         title: "Broadcast Message",
         href: "/pengelola/dashboard/broadcast"
-      },
-      {
-        title: "Notifikasi Operasional",
-        href: "/pengelola/dashboard/notifications"
-      },
-      {
-        title: "Support Ticket",
-        href: "/pengelola/dashboard/support",
-        badge: "urgent"
       }
-    ]
-  },
-  {
-    title: "Task Management",
-    icon: <ClipboardList className="w-5 h-5" />,
-    children: [
-      { title: "Task Harian", href: "/pengelola/tasks/daily", badge: "urgent" },
-      { title: "Checklist Operasi", href: "/pengelola/tasks/checklist" },
-      { title: "Follow-up Required", href: "/pengelola/tasks/followup" },
-      { title: "Completed Tasks", href: "/pengelola/tasks/completed" }
     ]
   }
 ];
 
 const reportingMenuItems: MenuItem[] = [
   {
-    title: "Laporan Operasional",
-    icon: <BarChart3 className="w-5 h-5" />,
-    children: [
-      { title: "Laporan Harian", href: "/pengelola/reports/daily" },
-      { title: "Laporan Mingguan", href: "/pengelola/reports/weekly" },
-      { title: "Performa Tim", href: "/pengelola/reports/team-performance" },
-      { title: "Analisis Trend", href: "/pengelola/reports/trends" }
-    ]
-  },
-  {
-    title: "Monitoring Kinerja",
-    icon: <TrendingUp className="w-5 h-5" />,
-    children: [
-      { title: "KPI Dashboard", href: "/pengelola/kpi/dashboard" },
-      { title: "Target Achievement", href: "/pengelola/kpi/targets" },
-      { title: "Efficiency Metrics", href: "/pengelola/kpi/efficiency" },
-      { title: "Quality Metrics", href: "/pengelola/kpi/quality" }
-    ]
-  },
-  {
-    title: "Alerts & Issues",
-    icon: <AlertCircle className="w-5 h-5" />,
-    children: [
-      {
-        title: "Alert Aktif",
-        href: "/pengelola/alerts/active",
-        badge: "urgent"
-      },
-      { title: "Issue Tracking", href: "/pengelola/alerts/issues" },
-      { title: "Maintenance Schedule", href: "/pengelola/alerts/maintenance" },
-      { title: "Escalation Log", href: "/pengelola/alerts/escalation" }
-    ]
-  },
-  {
     title: "Pengaturan",
     icon: <Settings className="w-5 h-5" />,
     children: [
-      { title: "Profil Pengelola", href: "/pengelola/settings/profile" },
       {
-        title: "Notifikasi Setting",
-        href: "/pengelola/settings/notifications"
-      },
-      { title: "Area Tanggung Jawab", href: "/pengelola/settings/area" },
-      { title: "Tim & Koordinator", href: "/pengelola/settings/team" }
+        title: "Profil Pengelola",
+        href: "/pengelola/dashboard/pengaturan"
+      }
     ]
   }
 ];
