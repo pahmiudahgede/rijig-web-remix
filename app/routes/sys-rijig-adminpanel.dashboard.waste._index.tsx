@@ -1,17 +1,10 @@
-import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+// app/routes/sys-rijig-adminpanel.dashboard.waste._index.tsx
+import { json, LoaderFunctionArgs } from "@remix-run/node";
+import { useLoaderData, useFetcher, useRevalidator } from "@remix-run/react";
 import { useState } from "react";
+import trashCategoryService from "~/services/trash/category.service";
+import type { TrashCategory } from "~/types/trash.types";
 
-// Interface untuk data waste
-interface WasteData {
-  id: string;
-  trash_name: string;
-  trash_icon: string;
-  estimated_price: number;
-  variety: string;
-  created_at: string;
-  updated_at: string;
-}
 import {
   Recycle,
   Plus,
@@ -29,7 +22,9 @@ import {
   Archive,
   Glasses,
   X,
-  Save
+  Save,
+  Upload,
+  AlertCircle
 } from "lucide-react";
 import {
   Card,
@@ -61,11 +56,11 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
-  DialogTrigger
+  DialogTitle
 } from "~/components/ui/dialog";
 import { Label } from "~/components/ui/label";
 import { Textarea } from "~/components/ui/textarea";
+import { Alert, AlertDescription } from "~/components/ui/alert";
 
 // Icon mapping untuk setiap jenis sampah
 const getWasteIcon = (trashName: string) => {
@@ -79,111 +74,78 @@ const getWasteIcon = (trashName: string) => {
   return Recycle; // default icon
 };
 
-export const loader = async () => {
-  // Simulasi data API sesuai format yang diminta
-  const wasteData = {
-    meta: {
-      status: 200,
-      message: "Trash categories retrieved successfully"
-    },
-    data: [
-      {
-        id: "9520dfd4-3bc8-4173-ac3d-4b17d466bc90",
-        trash_name: "Plastik",
-        trash_icon:
-          "/uploads/icontrash/a4e99d8c-8380-470f-87f1-01dc62fbe114_icontrash.png",
-        estimated_price: 1500,
-        variety:
-          "Jerigen plastik, tempat makanan thin wall, ember, galon air mineral, botol sabun, botol, sampo dan plastik keras sejenisnya",
-        created_at: "2025-06-12T05:08:43+07:00",
-        updated_at: "2025-06-12T05:08:43+07:00"
-      },
-      {
-        id: "8636ceee-6c13-41ab-abc6-5b0c603ba360",
-        trash_name: "Kertas",
-        trash_icon:
-          "/uploads/icontrash/a6414ed3-0675-4b38-a2c7-c6d3d24810cf_icontrash.png",
-        estimated_price: 1250,
-        variety:
-          "Kertas HVS, koran, majalah, buku, kertas, karton dan sejenisnya",
-        created_at: "2025-06-12T05:10:21+07:00",
-        updated_at: "2025-06-12T05:10:21+07:00"
-      },
-      {
-        id: "bec932a7-da0a-4e7b-b33c-a5e225e56cef",
-        trash_name: "Kaleng",
-        trash_icon:
-          "/uploads/icontrash/49b2ca06-cbfe-4650-bfb9-7d14aff2e09b_icontrash.png",
-        estimated_price: 1000,
-        variety: "Kaleng sarden, kaleng aerosol, kaleng makanan, dll",
-        created_at: "2025-06-12T05:14:38+07:00",
-        updated_at: "2025-06-12T05:14:38+07:00"
-      },
-      {
-        id: "9af0a2f2-4c9c-49b0-8f0b-ea8c38d9edd3",
-        trash_name: "Besi/Tembaga",
-        trash_icon:
-          "/uploads/icontrash/2a80005a-3038-4192-b70c-b22a54f11ae6_icontrash.png",
-        estimated_price: 3500,
-        variety: "Besi, tembaga, aluminium",
-        created_at: "2025-06-12T05:16:44+07:00",
-        updated_at: "2025-06-12T05:16:44+07:00"
-      },
-      {
-        id: "c5319782-b658-4639-83aa-8b88feb1b2a8",
-        trash_name: "Kardus",
-        trash_icon:
-          "/uploads/icontrash/1d900090-4b24-4d42-9c0e-e486839b9f63_icontrash.png",
-        estimated_price: 1500,
-        variety: "Kardus paket, kardus kemasan produk, dll",
-        created_at: "2025-06-12T05:19:15+07:00",
-        updated_at: "2025-06-12T05:19:15+07:00"
-      },
-      {
-        id: "131c7ca9-6f2d-4e98-a016-916c23ec45e9",
-        trash_name: "Kaca/Beling",
-        trash_icon:
-          "/uploads/icontrash/3be4f3ab-99a2-4b3c-930b-b2e0055cd705_icontrash.png",
-        estimated_price: 500,
-        variety:
-          "Botol kaca minuman, botol kaca kosmetik, botol sirup, botol saus, botol kecap, gelas kaca, piring kaca dan sejenisnya",
-        created_at: "2025-06-12T05:21:55+07:00",
-        updated_at: "2025-06-12T05:21:55+07:00"
-      }
-    ]
-  };
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  try {
+    // TODO: Add auth check here
+    // await requireAuthToken(request);
+    
+    console.log("Loading waste categories...");
+    const response = await trashCategoryService.getCategories();
+    console.log("API Response:", response);
+    
+    const wasteData = response.data || [];
 
-  // Hitung summary dari data
-  const summary = {
-    totalTypes: wasteData.data.length,
-    totalVolume: 0, // Tidak ada data volume di API baru
-    avgPrice: Math.round(
-      wasteData.data.reduce((sum, item) => sum + item.estimated_price, 0) /
-        wasteData.data.length
-    ),
-    trending: "up"
-  };
+    // Hitung summary dari data
+    const summary = {
+      totalTypes: wasteData.length,
+      totalVolume: 0, // Tidak ada data volume di API
+      avgPrice: wasteData.length > 0 
+        ? Math.round(
+            wasteData.reduce((sum, item) => sum + item.estimated_price, 0) / wasteData.length
+          )
+        : 0,
+      trending: "up"
+    };
 
-  return json({
-    wasteData: wasteData.data,
-    summary
-  });
+    return json({
+      wasteData,
+      summary,
+      baseUrl: process.env.RIJIG_API_BASE_URL || "",
+      error: null
+    });
+  } catch (error) {
+    console.error("Detailed loader error:", error);
+    console.error("Error stack:", error instanceof Error ? error.stack : 'No stack trace');
+    return json({
+      wasteData: [] as TrashCategory[],
+      summary: { totalTypes: 0, totalVolume: 0, avgPrice: 0, trending: "up" as const },
+      baseUrl: process.env.RIJIG_API_BASE_URL || "",
+      error: error instanceof Error ? error.message : "Failed to load data"
+    });
+  }
 };
 
 export default function WasteManagement() {
-  const { wasteData, summary } = useLoaderData<typeof loader>();
+  const { wasteData, summary, baseUrl, error } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher();
+  const revalidator = useRevalidator();
+
+  // Debug logging
+  console.log("Component rendered with data:", { wasteData, summary, baseUrl, error });
 
   // State untuk modal
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [selectedWaste, setSelectedWaste] = useState<WasteData | null>(null);
+  const [selectedWaste, setSelectedWaste] = useState<TrashCategory | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [apiError, setApiError] = useState<string>("");
 
   // State untuk form
   const [formData, setFormData] = useState({
     trash_name: "",
     estimated_price: "",
-    variety: ""
+    variety: "",
+    icon: null as File | null
+  });
+
+  // Debug state changes
+  console.log("Current state:", { 
+    showAddModal, 
+    showEditModal, 
+    showDeleteModal, 
+    loading, 
+    apiError 
   });
 
   // Handle form change
@@ -194,55 +156,153 @@ export default function WasteManagement() {
     }));
   };
 
+  // Handle file change
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setFormData(prev => ({ ...prev, icon: file }));
+    }
+  };
+
   // Handle add
   const handleAdd = () => {
-    setFormData({
-      trash_name: "",
-      estimated_price: "",
-      variety: ""
-    });
-    setShowAddModal(true);
+    try {
+      console.log("Handle add clicked");
+      setFormData({
+        trash_name: "",
+        estimated_price: "",
+        variety: "",
+        icon: null
+      });
+      setApiError("");
+      setShowAddModal(true);
+      console.log("Add modal should be open");
+    } catch (error) {
+      console.error("Error in handleAdd:", error);
+    }
   };
 
   // Handle edit
-  const handleEdit = (waste: WasteData) => {
-    setSelectedWaste(waste);
-    setFormData({
-      trash_name: waste.trash_name,
-      estimated_price: waste.estimated_price.toString(),
-      variety: waste.variety
-    });
-    setShowEditModal(true);
+  const handleEdit = (waste: TrashCategory) => {
+    try {
+      console.log("Handle edit clicked for:", waste.trash_name);
+      setSelectedWaste(waste);
+      setFormData({
+        trash_name: waste.trash_name,
+        estimated_price: waste.estimated_price.toString(),
+        variety: waste.variety,
+        icon: null
+      });
+      setApiError("");
+      setShowEditModal(true);
+      console.log("Edit modal should be open");
+    } catch (error) {
+      console.error("Error in handleEdit:", error);
+    }
   };
 
   // Handle delete
-  const handleDelete = (waste: WasteData) => {
-    setSelectedWaste(waste);
-    setShowDeleteModal(true);
+  const handleDelete = (waste: TrashCategory) => {
+    try {
+      console.log("Handle delete clicked for:", waste.trash_name);
+      setSelectedWaste(waste);
+      setApiError("");
+      setShowDeleteModal(true);
+      console.log("Delete modal should be open");
+    } catch (error) {
+      console.error("Error in handleDelete:", error);
+    }
   };
 
   // Handle save (add/edit)
-  const handleSave = () => {
-    // Di sini Anda bisa menambahkan logika untuk menyimpan data
-    console.log("Saving data:", formData);
-    setShowAddModal(false);
-    setShowEditModal(false);
-    // Reset form
-    setFormData({
-      trash_name: "",
-      estimated_price: "",
-      variety: ""
-    });
+  const handleSave = async () => {
+    try {
+      console.log("Handle save clicked, formData:", formData);
+      
+      if (!formData.trash_name || !formData.estimated_price || !formData.variety) {
+        setApiError("Semua field harus diisi");
+        return;
+      }
+
+      // Untuk add, icon wajib
+      if (!selectedWaste && !formData.icon) {
+        setApiError("Icon wajib diupload untuk kategori baru");
+        return;
+      }
+
+      setLoading(true);
+      setApiError("");
+
+      if (selectedWaste) {
+        console.log("Updating category:", selectedWaste.id);
+        // Edit existing
+        await trashCategoryService.updateCategory(selectedWaste.id, {
+          name: formData.trash_name,
+          variety: formData.variety,
+          estimated_price: formData.estimated_price,
+          icon: formData.icon || undefined
+        });
+        console.log("Update successful");
+      } else {
+        console.log("Creating new category");
+        // Add new
+        await trashCategoryService.createCategory({
+          name: formData.trash_name,
+          variety: formData.variety,
+          estimated_price: formData.estimated_price,
+          icon: formData.icon!
+        });
+        console.log("Create successful");
+      }
+
+      // Close modal and refresh data
+      setShowAddModal(false);
+      setShowEditModal(false);
+      setSelectedWaste(null);
+      setFormData({
+        trash_name: "",
+        estimated_price: "",
+        variety: "",
+        icon: null
+      });
+      
+      console.log("Revalidating data...");
+      // Refresh page data
+      revalidator.revalidate();
+    } catch (error: any) {
+      console.error("Detailed save error:", error);
+      console.error("Error response:", error.response);
+      setApiError(error.response?.data?.meta?.message || error.message || "Gagal menyimpan data");
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Handle confirm delete
-  const handleConfirmDelete = () => {
-    // Di sini Anda bisa menambahkan logika untuk menghapus data
-    if (selectedWaste) {
-      console.log("Deleting:", selectedWaste);
+  const handleConfirmDelete = async () => {
+    if (!selectedWaste) return;
+
+    try {
+      console.log("Deleting category:", selectedWaste.id);
+      setLoading(true);
+      setApiError("");
+
+      await trashCategoryService.deleteCategory(selectedWaste.id);
+      console.log("Delete successful");
+      
+      setShowDeleteModal(false);
+      setSelectedWaste(null);
+      
+      console.log("Revalidating data after delete...");
+      // Refresh page data
+      revalidator.revalidate();
+    } catch (error: any) {
+      console.error("Detailed delete error:", error);
+      console.error("Error response:", error.response);
+      setApiError(error.response?.data?.meta?.message || error.message || "Gagal menghapus data");
+    } finally {
+      setLoading(false);
     }
-    setShowDeleteModal(false);
-    setSelectedWaste(null);
   };
 
   return (
@@ -265,6 +325,14 @@ export default function WasteManagement() {
           Tambah Jenis Sampah
         </Button>
       </div>
+
+      {/* Error Alert */}
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -358,13 +426,26 @@ export default function WasteManagement() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {wasteData.map((waste) => {
+              {wasteData.map((waste: TrashCategory) => {
                 const IconComponent = getWasteIcon(waste.trash_name);
                 return (
                   <TableRow key={waste.id}>
                     <TableCell>
-                      <div className="flex items-center justify-center w-10 h-10 bg-green-100 rounded-lg">
-                        <IconComponent className="w-6 h-6 text-green-600" />
+                      <div className="flex items-center gap-2">
+                        {/* Real image from API */}
+                        <img
+                          src={`${baseUrl}${waste.trash_icon}`}
+                          alt={waste.trash_name}
+                          className="w-10 h-10 object-cover rounded-lg"
+                          onError={(e) => {
+                            // Fallback to icon if image fails to load
+                            e.currentTarget.style.display = 'none';
+                          }}
+                        />
+                        {/* Fallback icon */}
+                        <div className="flex items-center justify-center w-10 h-10 bg-green-100 rounded-lg">
+                          <IconComponent className="w-6 h-6 text-green-600" />
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell className="font-medium">
@@ -423,6 +504,14 @@ export default function WasteManagement() {
               Tambahkan jenis sampah baru dengan detail lengkap
             </DialogDescription>
           </DialogHeader>
+          
+          {apiError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{apiError}</AlertDescription>
+            </Alert>
+          )}
+
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="add-name">Nama Sampah</Label>
@@ -455,17 +544,40 @@ export default function WasteManagement() {
                 rows={3}
               />
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="add-icon">Icon Kategori</Label>
+              <Input
+                id="add-icon"
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+              />
+              <p className="text-sm text-muted-foreground">
+                Upload gambar icon untuk kategori sampah (wajib)
+              </p>
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddModal(false)}>
+            <Button 
+              variant="outline" 
+              onClick={() => setShowAddModal(false)}
+              disabled={loading}
+            >
               Batal
             </Button>
             <Button
               onClick={handleSave}
               className="bg-green-600 hover:bg-green-700"
+              disabled={loading}
             >
-              <Save className="h-4 w-4 mr-2" />
-              Simpan
+              {loading ? (
+                <>Loading...</>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Simpan
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -483,6 +595,14 @@ export default function WasteManagement() {
               Perbarui informasi jenis sampah
             </DialogDescription>
           </DialogHeader>
+
+          {apiError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{apiError}</AlertDescription>
+            </Alert>
+          )}
+
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="edit-name">Nama Sampah</Label>
@@ -515,17 +635,40 @@ export default function WasteManagement() {
                 rows={3}
               />
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-icon">Icon Kategori (opsional)</Label>
+              <Input
+                id="edit-icon"
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+              />
+              <p className="text-sm text-muted-foreground">
+                Kosongkan jika tidak ingin mengubah icon
+              </p>
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditModal(false)}>
+            <Button 
+              variant="outline" 
+              onClick={() => setShowEditModal(false)}
+              disabled={loading}
+            >
               Batal
             </Button>
             <Button
               onClick={handleSave}
               className="bg-blue-600 hover:bg-blue-700"
+              disabled={loading}
             >
-              <Save className="h-4 w-4 mr-2" />
-              Update
+              {loading ? (
+                <>Loading...</>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Update
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -544,16 +687,32 @@ export default function WasteManagement() {
               tidak dapat dibatalkan.
             </DialogDescription>
           </DialogHeader>
+
+          {apiError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{apiError}</AlertDescription>
+            </Alert>
+          )}
+
           {selectedWaste && (
             <div className="py-4">
               <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
                 <div className="flex items-center gap-3">
+                  <img
+                    src={`${baseUrl}${selectedWaste.trash_icon}`}
+                    alt={selectedWaste.trash_name}
+                    className="w-10 h-10 object-cover rounded-lg"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                      if (fallback) fallback.style.display = 'flex';
+                    }}
+                  />
                   {(() => {
-                    const IconComponent = getWasteIcon(
-                      selectedWaste.trash_name
-                    );
+                    const IconComponent = getWasteIcon(selectedWaste.trash_name);
                     return (
-                      <div className="flex items-center justify-center w-10 h-10 bg-red-100 rounded-lg">
+                      <div className="hidden items-center justify-center w-10 h-10 bg-red-100 rounded-lg">
                         <IconComponent className="w-6 h-6 text-red-600" />
                       </div>
                     );
@@ -569,15 +728,26 @@ export default function WasteManagement() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeleteModal(false)}>
+            <Button 
+              variant="outline" 
+              onClick={() => setShowDeleteModal(false)}
+              disabled={loading}
+            >
               Batal
             </Button>
             <Button
               onClick={handleConfirmDelete}
               className="bg-red-600 hover:bg-red-700"
+              disabled={loading}
             >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Hapus
+              {loading ? (
+                <>Loading...</>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Hapus
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
