@@ -304,8 +304,8 @@ export default function AdminLogin() {
                       Demo Credentials:
                     </p>
                     <div className="text-xs text-blue-700 dark:text-blue-400 space-y-1">
-                      <p>Email: pahmilucu123@gmail.com</p>
-                      <p>Password: Halo12345,</p>
+                      <p>Email: rijigwasteapp@gmail.com</p>
+                      <p>Password: Pahmi12345,</p>
                       <p className="text-amber-600 dark:text-amber-400 font-medium">
                         ⚠️ OTP akan dikirim ke email setelah login
                       </p>

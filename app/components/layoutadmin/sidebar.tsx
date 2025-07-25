@@ -62,25 +62,8 @@ const menuItems: MenuItem[] = [
   {
     title: "Manajemen User",
     icon: <Users className="w-5 h-5" />,
-    children: [
-      {
-        title: "Verifikasi User",
-        href: "/sys-rijig-adminpanel/dashboard/users",
-        badge: "urgent"
-      },
-      {
-        title: "Masyarakat",
-        href: "/sys-rijig-adminpanel/masyarakat"
-      },
-      {
-        title: "Pengepul",
-        href: "/sys-rijig-adminpanel/pengepul"
-      },
-      {
-        title: "Pengelola",
-        href: "/sys-rijig-adminpanel/pengelola"
-      }
-    ]
+    href: "/sys-rijig-adminpanel/dashboard/users",
+    badge: "urgent"
   },
   {
     title: "Artikel & Blog",
